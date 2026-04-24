@@ -11,6 +11,7 @@ extern crate intel_mkl_src;
 extern crate accelerate_src;
 
 mod adapter;
+mod bench;
 mod checkpoint;
 mod dataset;
 mod lora;
@@ -149,6 +150,21 @@ struct Args {
     /// Qwen-length Discord inputs anyway.
     #[arg(long, default_value_t = 0)]
     prefetch_queue: usize,
+
+    /// Run in benchmark mode: 3 warmup + 20 measured optimizer steps with
+    /// a fixed pre-tokenized pool of examples. Prints a single-line
+    /// BENCH {...} json with tokens/sec, step latency, peak VRAM, and
+    /// mean GPU util. Writes no adapter. Intended as the before/after
+    /// measurement for every optimization attempt — changes that don't
+    /// improve one of these metrics without regressing another aren't
+    /// worth landing.
+    #[arg(long)]
+    benchmark: bool,
+
+    /// Optional label stamped into the BENCH line for easy grep across
+    /// runs. Default: empty.
+    #[arg(long, default_value = "")]
+    bench_label: String,
 }
 
 fn main() -> Result<()> {
@@ -307,6 +323,106 @@ fn main() -> Result<()> {
         }
     );
     eprintln!("  ce chunk size  : {}", args.ce_chunk_size);
+
+    // ======================================================================
+    // BENCHMARK MODE: fixed-protocol measurement, no adapter written.
+    //
+    // When `--benchmark` is set we short-circuit the training loop, pre-
+    // tokenize a small fixed pool of examples, and run 3 warmup + 20
+    // measured optimizer steps through the same forward/backward path
+    // used by real training. Output is a single BENCH {...} json line
+    // which makes before/after comparisons trivial.
+    // ======================================================================
+    if args.benchmark {
+        eprintln!("  mode           : BENCHMARK (3 warmup + 20 measured steps)");
+        // Build a pool of N=32 tokenized examples to cycle — larger than
+        // grad_accum * measure_steps is unnecessary and wastes tokenize time.
+        let mut tok_pool: Vec<dataset::TokenizedExample> = Vec::with_capacity(32);
+        let mut fallback_rng_bench = StdRng::seed_from_u64(args.seed);
+        let mut fallback_idx: Vec<usize> = (0..dataset.len()).collect();
+        fallback_idx.shuffle(&mut fallback_rng_bench);
+        for &i in fallback_idx.iter().take(128) {
+            let t = dataset::tokenize_pair(&tokenizer, dataset.get(i), args.max_seq_len)?;
+            if t.input_ids.len() >= 2 {
+                tok_pool.push(t);
+                if tok_pool.len() >= 32 {
+                    break;
+                }
+            }
+        }
+        anyhow::ensure!(!tok_pool.is_empty(), "couldn't build benchmark pool");
+
+        let cfg = bench::BenchConfig {
+            warmup_steps: 3,
+            measure_steps: 20,
+            sample_nvidia_smi: true,
+            cfg_label: if args.bench_label.is_empty() {
+                format!(
+                    "rank={},targets={},seq={},ga={},gc={}",
+                    args.rank,
+                    args.target_modules,
+                    args.max_seq_len,
+                    args.grad_accum_steps,
+                    args.gradient_checkpoint
+                )
+            } else {
+                args.bench_label.clone()
+            },
+        };
+
+        let mut pool_cursor = 0usize;
+        let result = bench::run(&cfg, |_iter_idx| -> Result<usize> {
+            let mut step_tokens = 0usize;
+            for _ in 0..args.grad_accum_steps {
+                let tok = &tok_pool[pool_cursor % tok_pool.len()];
+                pool_cursor += 1;
+                let (input_ids, loss_mask) = dataset::batch_to_tensors(
+                    std::slice::from_ref(tok),
+                    args.pad_token_id,
+                    &device,
+                )?;
+                let (_b, seq_len) = input_ids.dims2()?;
+                let shifted_input = input_ids.narrow(1, 0, seq_len - 1)?;
+                let shifted_target = input_ids.narrow(1, 1, seq_len - 1)?;
+                let shifted_mask = loss_mask.narrow(1, 1, seq_len - 1)?;
+
+                if args.gradient_checkpoint {
+                    let mut ctx = checkpoint::CheckpointContext::new();
+                    let (hidden, attn_mask) =
+                        model.forward_train_with_checkpoint(&shifted_input, &mut ctx)?;
+                    let loss = xentropy::tiled_cross_entropy(
+                        &hidden,
+                        model.lm_head(),
+                        &shifted_target,
+                        &shifted_mask,
+                        args.ce_chunk_size,
+                    )?;
+                    let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
+                    let mut grads = candle::backprop::GradStore::default();
+                    scaled_loss.backward_into(&mut grads, None)?;
+                    model.backward_through_checkpoints(&ctx, &mut grads, attn_mask.as_ref())?;
+                    optim.step(&grads)?;
+                } else {
+                    let hidden = model.forward_train(&shifted_input)?;
+                    let loss = xentropy::tiled_cross_entropy(
+                        &hidden,
+                        model.lm_head(),
+                        &shifted_target,
+                        &shifted_mask,
+                        args.ce_chunk_size,
+                    )?;
+                    let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
+                    optim.backward_step(&scaled_loss)?;
+                }
+                step_tokens += tok.input_ids.len().saturating_sub(1);
+            }
+            Ok(step_tokens)
+        })?;
+
+        println!("{}", result.to_single_line());
+        return Ok(());
+    }
+
 
     let mut fallback_rng = StdRng::seed_from_u64(args.seed.wrapping_add(resume_step as u64));
     let mut fallback_indices: Vec<usize> = (0..dataset.len()).collect();
