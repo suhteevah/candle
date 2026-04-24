@@ -18,9 +18,31 @@
 
 use crate::lora::{LoRAConfig, LoRALinear};
 use candle::{DType, Device, IndexOp, Module, Result, Tensor, D};
-use candle_nn::{Activation, RmsNorm, VarBuilder};
+use candle_nn::{Activation, VarBuilder};
 use std::collections::HashSet;
 use std::sync::Arc;
+
+/// Differentiable RmsNorm. Candle's `candle_nn::RmsNorm` calls
+/// `ops::rms_norm` (no_bwd) — fine for inference, fatal for training. We
+/// hold only the alpha weight and call `ops::rms_norm_slow` at forward time.
+#[derive(Debug, Clone)]
+struct DiffRmsNorm {
+    weight: Tensor,
+    eps: f64,
+}
+
+impl DiffRmsNorm {
+    fn new(hidden_size: usize, eps: f64, vb: VarBuilder) -> Result<Self> {
+        let weight = vb.get_with_hints(hidden_size, "weight", candle_nn::init::ONE)?;
+        Ok(Self { weight, eps })
+    }
+}
+
+impl Module for DiffRmsNorm {
+    fn forward(&self, xs: &Tensor) -> Result<Tensor> {
+        candle_nn::ops::rms_norm_slow(xs, &self.weight, self.eps as f32)
+    }
+}
 
 /// Projections that can be LoRA-adapted. Mirrors HuggingFace PEFT naming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,8 +136,14 @@ impl RotaryEmbedding {
         let (_b_sz, _h, seq_len, _n_embd) = q.dims4()?;
         let cos = self.cos.narrow(0, seqlen_offset, seq_len)?;
         let sin = self.sin.narrow(0, seqlen_offset, seq_len)?;
-        let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
-        let k_embed = candle_nn::rotary_emb::rope(&k.contiguous()?, &cos, &sin)?;
+        // rope_slow uses standard differentiable ops (narrow + cat + mul),
+        // preserving the autograd graph through q_proj/k_proj LoRA adapters.
+        // The fast `rope` function calls apply_op3_no_bwd which silently cuts
+        // the gradient graph — catastrophic for LoRA training. The speed
+        // difference vs rope_slow is negligible compared to the cost of a
+        // full forward+backward pass through 28 transformer layers.
+        let q_embed = candle_nn::rotary_emb::rope_slow(&q.contiguous()?, &cos, &sin)?;
+        let k_embed = candle_nn::rotary_emb::rope_slow(&k.contiguous()?, &cos, &sin)?;
         Ok((q_embed, k_embed))
     }
 }
@@ -159,21 +187,9 @@ impl LoRAProjection {
         match &self.adapter {
             None => Ok(base_out),
             Some(a) => {
-                // Mixed-precision bridge: LoRA adapters are fp32 (stable
-                // optimizer math), base is often fp16 on GPU. Cast input up
-                // to fp32 for the adapter forward, then cast the delta back
-                // down to the base dtype before adding.
-                let xs_f32 = if xs.dtype() == DType::F32 {
-                    xs.clone()
-                } else {
-                    xs.to_dtype(DType::F32)?
-                };
-                let delta = a.forward_delta(&xs_f32, training)?;
-                let delta = if delta.dtype() != base_out.dtype() {
-                    delta.to_dtype(base_out.dtype())?
-                } else {
-                    delta
-                };
+                // LoRA adapters now match base dtype — no cast, no autograd
+                // graph breakage. See main.rs for the rationale.
+                let delta = a.forward_delta(xs, training)?;
                 base_out.broadcast_add(&delta)
             }
         }
@@ -396,7 +412,9 @@ impl Attention {
             } else {
                 attn_weights.to_dtype(DType::F32)?
             };
-            let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
+            // Use the differentiable softmax (built from max+sub+exp+sum+div
+            // with full autograd support) instead of softmax_last_dim (no_bwd).
+            let attn_weights = candle_nn::ops::softmax(&attn_weights, D::Minus1)?;
             let attn_weights = if attn_weights.dtype() == value_states.dtype() {
                 attn_weights
             } else {
@@ -419,8 +437,8 @@ impl Attention {
 struct DecoderLayer {
     self_attn: Attention,
     mlp: MLP,
-    input_layernorm: RmsNorm,
-    post_attention_layernorm: RmsNorm,
+    input_layernorm: DiffRmsNorm,
+    post_attention_layernorm: DiffRmsNorm,
 }
 
 impl DecoderLayer {
@@ -447,12 +465,12 @@ impl DecoderLayer {
             vb_base.pp("mlp"),
             vb_lora.pp("mlp"),
         )?;
-        let input_layernorm = candle_nn::rms_norm(
+        let input_layernorm = DiffRmsNorm::new(
             cfg.hidden_size,
             cfg.rms_norm_eps,
             vb_base.pp("input_layernorm"),
         )?;
-        let post_attention_layernorm = candle_nn::rms_norm(
+        let post_attention_layernorm = DiffRmsNorm::new(
             cfg.hidden_size,
             cfg.rms_norm_eps,
             vb_base.pp("post_attention_layernorm"),
@@ -491,7 +509,7 @@ impl DecoderLayer {
 pub struct Model {
     embed_tokens: candle_nn::Embedding,
     layers: Vec<DecoderLayer>,
-    norm: RmsNorm,
+    norm: DiffRmsNorm,
     lm_head: candle_nn::Linear,
     sliding_window: usize,
     device: Device,
@@ -536,7 +554,7 @@ impl Model {
             )?;
             layers.push(layer)
         }
-        let norm = candle_nn::rms_norm(cfg.hidden_size, cfg.rms_norm_eps, vb_m.pp("norm"))?;
+        let norm = DiffRmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb_m.pp("norm"))?;
         let lm_head = if vb_base.contains_tensor("lm_head.weight") {
             candle_nn::linear_no_bias(cfg.hidden_size, cfg.vocab_size, vb_base.pp("lm_head"))?
         } else {

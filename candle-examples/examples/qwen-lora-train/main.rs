@@ -161,10 +161,13 @@ fn main() -> Result<()> {
     };
 
     // --- LoRA VarBuilder (trainable, fresh VarMap) ---
-    // Adapters stay fp32 even when base is fp16 — more stable optimizer math,
-    // and the VRAM cost is tiny (thousands of params per layer, not millions).
+    // Match adapter dtype to base dtype. Earlier attempt used fp32 adapters
+    // for optimizer stability, but the to_dtype(base_dtype) cast on the
+    // delta tensor appears to break candle's autograd — gradients stopped
+    // at the cast and never reached lora_A / lora_B. Keeping everything in
+    // base dtype eliminates all casts in the forward path.
     let lora_varmap = VarMap::new();
-    let vb_lora = VarBuilder::from_varmap(&lora_varmap, DType::F32, &device);
+    let vb_lora = VarBuilder::from_varmap(&lora_varmap, dtype, &device);
 
     // --- build model ---
     let targets = parse_target_modules(&args.target_modules)?;
@@ -237,6 +240,7 @@ fn main() -> Result<()> {
             // Gradient accumulation: scale loss so the step-level total is
             // roughly independent of grad_accum_steps.
             let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
+
             optim.backward_step(&scaled_loss)?;
 
             accum_count += 1;
