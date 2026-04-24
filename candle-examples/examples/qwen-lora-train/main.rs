@@ -17,6 +17,7 @@ mod dataset;
 mod lora;
 mod prefetch;
 mod qwen2_lora;
+mod qwen2_lora_quantized;
 mod xentropy;
 
 use anyhow::{Context, Result};
@@ -40,8 +41,6 @@ use qwen2_lora::{parse_target_modules, Model};
 #[command(author, version, about = "Qwen2.5 LoRA fine-tune (older-GPU friendly)", long_about = None)]
 struct Args {
     /// Directory containing safetensors base weights + config.json + tokenizer.json.
-    /// Expected layout matches HF: {base_dir}/config.json, {base_dir}/tokenizer.json,
-    /// {base_dir}/model.safetensors (or model-*.safetensors shards + .index.json).
     #[arg(long)]
     base_dir: PathBuf,
 
