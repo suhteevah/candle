@@ -33,16 +33,74 @@ use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use adapter::PeftAdapterConfig;
+use candle::Module;
 use dataset::Dataset;
 use lora::LoRAConfig;
 use qwen2_lora::{parse_target_modules, Model};
+
+/// Runtime-dispatched model — either the fp16 safetensors path (Model)
+/// or the GGUF quantized path (qwen2_lora_quantized::Model). Both
+/// variants expose the same training operations via matching methods.
+enum TrainModel {
+    Fp(qwen2_lora::Model),
+    Quant(qwen2_lora_quantized::Model),
+}
+
+impl TrainModel {
+    fn forward_train(&mut self, input_ids: &Tensor) -> candle::Result<Tensor> {
+        match self {
+            TrainModel::Fp(m) => m.forward_train(input_ids),
+            TrainModel::Quant(m) => m.forward_train(input_ids),
+        }
+    }
+    fn forward_train_with_checkpoint(
+        &mut self,
+        input_ids: &Tensor,
+        ctx: &mut checkpoint::CheckpointContext,
+    ) -> candle::Result<(Tensor, Option<Tensor>)> {
+        match self {
+            TrainModel::Fp(m) => m.forward_train_with_checkpoint(input_ids, ctx),
+            TrainModel::Quant(m) => m.forward_train_with_checkpoint(input_ids, ctx),
+        }
+    }
+    fn backward_through_checkpoints(
+        &mut self,
+        ctx: &checkpoint::CheckpointContext,
+        grads: &mut candle::backprop::GradStore,
+        mask: Option<&Tensor>,
+    ) -> candle::Result<()> {
+        match self {
+            TrainModel::Fp(m) => m.backward_through_checkpoints(ctx, grads, mask),
+            TrainModel::Quant(m) => m.backward_through_checkpoints(ctx, grads, mask),
+        }
+    }
+    fn apply_lm_head(&self, hidden: &Tensor) -> candle::Result<Tensor> {
+        match self {
+            TrainModel::Fp(m) => hidden.apply(m.lm_head()),
+            TrainModel::Quant(m) => m.output_matmul().forward(hidden),
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Qwen2.5 LoRA fine-tune (older-GPU friendly)", long_about = None)]
 struct Args {
     /// Directory containing safetensors base weights + config.json + tokenizer.json.
+    /// Required unless `--gguf` is set.
     #[arg(long)]
-    base_dir: PathBuf,
+    base_dir: Option<PathBuf>,
+
+    /// Path to a single-file GGUF (quantized) base model. When set,
+    /// switches to the QLoRA training path: base weights stay quantized
+    /// in VRAM (Q4_K_M ~4.5GB for 7B), only LoRA adapters train.
+    /// Requires `--tokenizer`.
+    #[arg(long)]
+    gguf: Option<PathBuf>,
+
+    /// Path to tokenizer.json. REQUIRED with `--gguf` (GGUFs don't embed
+    /// an HF tokenizer). Ignored with `--base-dir` (auto-discovered).
+    #[arg(long)]
+    tokenizer: Option<PathBuf>,
 
     /// Path to training JSONL in matt-voice corpus format.
     #[arg(long)]
@@ -178,7 +236,14 @@ fn main() -> Result<()> {
     eprintln!("qwen-lora-train v1 (fp16 base + fp32 adapters)");
     eprintln!("  device         : {:?}", device);
     eprintln!("  dtype (base)   : {:?}", dtype);
-    eprintln!("  base dir       : {}", args.base_dir.display());
+    eprintln!(
+        "  base          : {}",
+        match (args.gguf.as_ref(), args.base_dir.as_ref()) {
+            (Some(g), _) => format!("gguf:{}", g.display()),
+            (None, Some(b)) => format!("safetensors:{}", b.display()),
+            (None, None) => "(none)".to_string(),
+        }
+    );
     eprintln!("  dataset        : {}", args.dataset.display());
     eprintln!("  output dir     : {}", args.output_dir.display());
     eprintln!(
@@ -195,61 +260,115 @@ fn main() -> Result<()> {
         args.max_steps
     );
 
-    // --- tokenizer + config ---
-    let tokenizer_path = args.base_dir.join("tokenizer.json");
+    // --- tokenizer ---
+    let tokenizer_path: PathBuf = match (args.gguf.as_ref(), args.tokenizer.as_ref(), args.base_dir.as_ref()) {
+        (Some(_), Some(t), _) => t.clone(),
+        (Some(_), None, _) => {
+            anyhow::bail!("--gguf requires --tokenizer (GGUFs don't embed HF tokenizers)")
+        }
+        (None, Some(t), _) => t.clone(),
+        (None, None, Some(b)) => b.join("tokenizer.json"),
+        (None, None, None) => {
+            anyhow::bail!("must provide either --gguf + --tokenizer or --base-dir")
+        }
+    };
     let tokenizer = Tokenizer::from_file(&tokenizer_path)
         .map_err(anyhow::Error::msg)
         .with_context(|| format!("load tokenizer from {tokenizer_path:?}"))?;
-
-    let config_path = args.base_dir.join("config.json");
-    let config_str =
-        std::fs::read_to_string(&config_path).with_context(|| format!("read {config_path:?}"))?;
-    let config: qwen2_lora::Config =
-        serde_json::from_str(&config_str).context("parse config.json")?;
-    eprintln!(
-        "  model          : {} layers, hidden={} heads={} kv_heads={}",
-        config.num_hidden_layers,
-        config.hidden_size,
-        config.num_attention_heads,
-        config.num_key_value_heads
-    );
 
     // --- dataset ---
     let dataset = Dataset::load_jsonl(&args.dataset).context("load dataset")?;
     eprintln!("  dataset        : {} pairs", dataset.len());
     anyhow::ensure!(!dataset.is_empty(), "dataset is empty");
 
-    // --- base VarBuilder (frozen, mmap'd safetensors) ---
-    let safetensor_files = discover_safetensor_shards(&args.base_dir)?;
-    eprintln!("  base shards    : {}", safetensor_files.len());
-    let vb_base = unsafe {
-        VarBuilder::from_mmaped_safetensors(&safetensor_files, dtype, &device)?
-    };
-
-    // --- LoRA VarBuilder (trainable, fresh VarMap) ---
-    // Match adapter dtype to base dtype. Earlier attempt used fp32 adapters
-    // for optimizer stability, but the to_dtype(base_dtype) cast on the
-    // delta tensor appears to break candle's autograd — gradients stopped
-    // at the cast and never reached lora_A / lora_B. Keeping everything in
-    // base dtype eliminates all casts in the forward path.
+    // --- LoRA VarBuilder (trainable, fresh VarMap) — dtype matches base.
     let mut lora_varmap = VarMap::new();
-    let vb_lora = VarBuilder::from_varmap(&lora_varmap, dtype, &device);
-
-    // --- build model ---
     let targets = parse_target_modules(&args.target_modules)?;
     let lora_cfg = LoRAConfig {
         rank: args.rank,
         alpha: args.alpha,
         dropout: args.dropout,
     };
-    eprintln!(
-        "  LoRA adapters  : {} projection types × {} layers = {} total",
-        targets.len(),
-        config.num_hidden_layers,
-        targets.len() * config.num_hidden_layers
-    );
 
-    let mut model = Model::new(&config, &targets, &lora_cfg, vb_base, vb_lora)?;
+    // --- build model (dispatch on --gguf) ---
+    let mut model: TrainModel = if let Some(gguf_path) = args.gguf.as_ref() {
+        eprintln!("  mode           : QLoRA (quantized GGUF base)");
+        eprintln!("  gguf           : {}", gguf_path.display());
+        let mut f = std::fs::File::open(gguf_path)
+            .with_context(|| format!("open GGUF {gguf_path:?}"))?;
+        let ct = candle::quantized::gguf_file::Content::read(&mut f)
+            .with_context(|| format!("read GGUF content {gguf_path:?}"))?;
+        // Peek a couple metadata fields for the summary line.
+        let n_layers = ct
+            .metadata
+            .get("qwen2.block_count")
+            .and_then(|v| v.to_u32().ok())
+            .unwrap_or(0);
+        let n_head = ct
+            .metadata
+            .get("qwen2.attention.head_count")
+            .and_then(|v| v.to_u32().ok())
+            .unwrap_or(0);
+        let hidden = ct
+            .metadata
+            .get("qwen2.embedding_length")
+            .and_then(|v| v.to_u32().ok())
+            .unwrap_or(0);
+        let n_kv = ct
+            .metadata
+            .get("qwen2.attention.head_count_kv")
+            .and_then(|v| v.to_u32().ok())
+            .unwrap_or(0);
+        eprintln!(
+            "  model          : {n_layers} layers, hidden={hidden} heads={n_head} kv_heads={n_kv} (quantized)"
+        );
+        // LoRA adapters live in fp32 per the convention we settled on;
+        // QLoRA uses fp32 adapters over quantized base, matches unsloth/peft.
+        let vb_lora = VarBuilder::from_varmap(&lora_varmap, DType::F32, &device);
+        eprintln!(
+            "  LoRA adapters  : {} projection types × {} layers = {} total",
+            targets.len(),
+            n_layers,
+            targets.len() as u32 * n_layers
+        );
+        let qm =
+            qwen2_lora_quantized::Model::from_gguf(ct, &mut f, &targets, &lora_cfg, vb_lora, &device)?;
+        TrainModel::Quant(qm)
+    } else {
+        let base_dir = args
+            .base_dir
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--base-dir is required in fp16 mode"))?;
+        eprintln!("  mode           : fp16 (safetensors base)");
+        eprintln!("  base dir       : {}", base_dir.display());
+        let config_path = base_dir.join("config.json");
+        let config_str = std::fs::read_to_string(&config_path)
+            .with_context(|| format!("read {config_path:?}"))?;
+        let config: qwen2_lora::Config =
+            serde_json::from_str(&config_str).context("parse config.json")?;
+        eprintln!(
+            "  model          : {} layers, hidden={} heads={} kv_heads={}",
+            config.num_hidden_layers,
+            config.hidden_size,
+            config.num_attention_heads,
+            config.num_key_value_heads
+        );
+        let safetensor_files = discover_safetensor_shards(base_dir)?;
+        eprintln!("  base shards    : {}", safetensor_files.len());
+        let vb_base = unsafe {
+            VarBuilder::from_mmaped_safetensors(&safetensor_files, dtype, &device)?
+        };
+        let vb_lora = VarBuilder::from_varmap(&lora_varmap, dtype, &device);
+        eprintln!(
+            "  LoRA adapters  : {} projection types × {} layers = {} total",
+            targets.len(),
+            config.num_hidden_layers,
+            targets.len() * config.num_hidden_layers
+        );
+        let m = qwen2_lora::Model::new(&config, &targets, &lora_cfg, vb_base, vb_lora)?;
+        TrainModel::Fp(m)
+    };
+
     let num_trainable_params: usize = lora_varmap
         .all_vars()
         .iter()
@@ -389,13 +508,8 @@ fn main() -> Result<()> {
                     let mut ctx = checkpoint::CheckpointContext::new();
                     let (hidden, attn_mask) =
                         model.forward_train_with_checkpoint(&shifted_input, &mut ctx)?;
-                    let loss = xentropy::tiled_cross_entropy(
-                        &hidden,
-                        model.lm_head(),
-                        &shifted_target,
-                        &shifted_mask,
-                        args.ce_chunk_size,
-                    )?;
+                    let logits = model.apply_lm_head(&hidden)?;
+                    let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
                     let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
                     let mut grads = candle::backprop::GradStore::default();
                     scaled_loss.backward_into(&mut grads, None)?;
@@ -403,13 +517,8 @@ fn main() -> Result<()> {
                     optim.step(&grads)?;
                 } else {
                     let hidden = model.forward_train(&shifted_input)?;
-                    let loss = xentropy::tiled_cross_entropy(
-                        &hidden,
-                        model.lm_head(),
-                        &shifted_target,
-                        &shifted_mask,
-                        args.ce_chunk_size,
-                    )?;
+                    let logits = model.apply_lm_head(&hidden)?;
+                    let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
                     let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
                     optim.backward_step(&scaled_loss)?;
                 }
@@ -472,13 +581,8 @@ fn main() -> Result<()> {
                 let mut ctx = checkpoint::CheckpointContext::new();
                 let (hidden, attn_mask) =
                     model.forward_train_with_checkpoint(&shifted_input, &mut ctx)?;
-                let loss = xentropy::tiled_cross_entropy(
-                    &hidden,
-                    model.lm_head(),
-                    &shifted_target,
-                    &shifted_mask,
-                    args.ce_chunk_size,
-                )?;
+                let logits = model.apply_lm_head(&hidden)?;
+                let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
                 let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
 
                 // Drive the checkpointed backward: outer backward seeds grad
@@ -493,13 +597,8 @@ fn main() -> Result<()> {
                 (loss, scaled_loss)
             } else {
                 let hidden = model.forward_train(&shifted_input)?;
-                let loss = xentropy::tiled_cross_entropy(
-                    &hidden,
-                    model.lm_head(),
-                    &shifted_target,
-                    &shifted_mask,
-                    args.ce_chunk_size,
-                )?;
+                let logits = model.apply_lm_head(&hidden)?;
+                let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
                 let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
                 optim.backward_step(&scaled_loss)?;
                 (loss, scaled_loss)
@@ -557,7 +656,11 @@ fn main() -> Result<()> {
         v
     };
     let peft_cfg = PeftAdapterConfig::new(
-        args.base_dir.to_string_lossy().into_owned(),
+        args.gguf
+            .as_ref()
+            .or(args.base_dir.as_ref())
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         args.rank,
         args.alpha,
         args.dropout,
@@ -576,7 +679,11 @@ fn peft_cfg_stub(args: &Args, targets: &HashSet<qwen2_lora::TargetModule>) -> Pe
     let mut names: Vec<String> = targets.iter().map(|t| t.as_str().to_string()).collect();
     names.sort();
     PeftAdapterConfig::new(
-        args.base_dir.to_string_lossy().into_owned(),
+        args.gguf
+            .as_ref()
+            .or(args.base_dir.as_ref())
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         args.rank,
         args.alpha,
         args.dropout,

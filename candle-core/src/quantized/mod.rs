@@ -805,13 +805,29 @@ impl crate::CustomOp1 for QTensor {
         _res: &Tensor,
         grad_res: &Tensor,
     ) -> Result<Option<Tensor>> {
+        // Dequantize the weight (shape (N, K)) and cast to match grad dtype.
         let w = self.dequantize(grad_res.device())?;
         let w = if w.dtype() != grad_res.dtype() {
             w.to_dtype(grad_res.dtype())?
         } else {
             w
         };
-        let grad_input = grad_res.matmul(&w)?;
+        let w_dims = w.dims2()?;
+        let k = w_dims.1;
+
+        // grad_res has shape [..., N]. Candle's matmul doesn't broadcast
+        // 3D × 2D, so reshape to 2D, matmul, reshape back to the input
+        // shape with the last dim replaced by K.
+        let grad_shape: Vec<usize> = grad_res.dims().to_vec();
+        let (prefix_dims, last_n) = grad_shape.split_at(grad_shape.len() - 1);
+        let prod: usize = prefix_dims.iter().product();
+        let grad_2d = grad_res
+            .contiguous()?
+            .reshape((prod, last_n[0]))?;
+        let out_2d = grad_2d.matmul(&w)?;
+        let mut out_shape: Vec<usize> = prefix_dims.to_vec();
+        out_shape.push(k);
+        let grad_input = out_2d.reshape(out_shape)?;
         Ok(Some(grad_input))
     }
 
