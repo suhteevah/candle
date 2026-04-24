@@ -104,7 +104,10 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let device = candle_examples::device(args.cpu)?;
-    let dtype = if device.is_cuda() { DType::F16 } else { DType::F32 };
+    // bf16 on CUDA: same memory footprint as fp16, same range as fp32 — no
+    // overflow when loading bf16-stored safetensors (Qwen, most HF models).
+    // fp32 on CPU for portability + no overhead from fake-bf16 kernels.
+    let dtype = if device.is_cuda() { DType::BF16 } else { DType::F32 };
 
     eprintln!("qwen-lora-train v1 (fp16 base + fp32 adapters)");
     eprintln!("  device         : {:?}", device);
@@ -285,9 +288,18 @@ fn main() -> Result<()> {
 
 /// Masked token-level cross-entropy loss.
 /// `logits` is `[B, L, V]`; `target` and `mask` are `[B, L]` with `u8` mask.
+///
+/// We cast logits to fp32 up front — log_softmax + gather + reductions in
+/// fp16 are numerically unstable AND candle's op implementations often
+/// require fp32 input. The loss itself is a scalar, cost is negligible.
 fn masked_cross_entropy(logits: &Tensor, target: &Tensor, mask: &Tensor) -> candle::Result<Tensor> {
     use candle_nn::ops;
-    let (_b, seq_len, vocab) = logits.dims3()?;
+    let logits = if logits.dtype() == DType::F32 {
+        logits.clone()
+    } else {
+        logits.to_dtype(DType::F32)?
+    };
+    let (_b, _seq_len, vocab) = logits.dims3()?;
     let logits_2d = logits.reshape(((), vocab))?;
     let target_1d = target.reshape(((),))?;
     let log_probs = ops::log_softmax(&logits_2d, 1)?;
@@ -300,7 +312,6 @@ fn masked_cross_entropy(logits: &Tensor, target: &Tensor, mask: &Tensor) -> cand
     let denom = mask_1d.sum_all()?;
     let denom_f = denom.to_scalar::<f32>()?.max(1.0) as f64;
     let nll = (num.affine(-1.0, 0.0)? / denom_f)?;
-    let _ = seq_len;
     Ok(nll)
 }
 

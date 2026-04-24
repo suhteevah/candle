@@ -159,7 +159,16 @@ impl LoRAProjection {
         match &self.adapter {
             None => Ok(base_out),
             Some(a) => {
-                let delta = a.forward_delta(xs, training)?;
+                // Mixed-precision bridge: LoRA adapters are fp32 (stable
+                // optimizer math), base is often fp16 on GPU. Cast input up
+                // to fp32 for the adapter forward, then cast the delta back
+                // down to the base dtype before adding.
+                let xs_f32 = if xs.dtype() == DType::F32 {
+                    xs.clone()
+                } else {
+                    xs.to_dtype(DType::F32)?
+                };
+                let delta = a.forward_delta(&xs_f32, training)?;
                 let delta = if delta.dtype() != base_out.dtype() {
                     delta.to_dtype(base_out.dtype())?
                 } else {
@@ -377,7 +386,22 @@ impl Attention {
                 None => attn_weights,
                 Some(mask) => attn_weights.broadcast_add(mask)?,
             };
+            // fp16 softmax is a known overflow/NaN hazard — pre-softmax
+            // logits commonly exceed fp16's 65504 range after scaling by
+            // sqrt(head_dim). Cast to fp32 for softmax, cast back for the
+            // subsequent matmul against values.
+            let attn_dtype_orig = attn_weights.dtype();
+            let attn_weights = if attn_dtype_orig == DType::F32 {
+                attn_weights
+            } else {
+                attn_weights.to_dtype(DType::F32)?
+            };
             let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
+            let attn_weights = if attn_weights.dtype() == value_states.dtype() {
+                attn_weights
+            } else {
+                attn_weights.to_dtype(value_states.dtype())?
+            };
             attn_weights.matmul(&value_states)?
         };
         let attn_output = attn_output
