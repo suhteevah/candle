@@ -113,6 +113,15 @@ struct Args {
     /// weights only, not the optimizer's running statistics.
     #[arg(long)]
     resume_from: Option<PathBuf>,
+
+    /// Enable gradient (activation) checkpointing at the DecoderLayer
+    /// boundary. Saves ~10-20× peak activation memory in exchange for
+    /// running each layer's forward twice — once during the original
+    /// forward, once during the backward recompute. Required to fit any
+    /// real config on a 4GB Maxwell card; useful on an 8GB Ampere to
+    /// unlock longer sequences or more target modules.
+    #[arg(long)]
+    gradient_checkpoint: bool,
 }
 
 fn main() -> Result<()> {
@@ -273,14 +282,31 @@ fn main() -> Result<()> {
             let shifted_target = input_ids.narrow(1, 1, seq_len - 1)?;
             let shifted_mask = loss_mask.narrow(1, 1, seq_len - 1)?;
 
-            let logits = model.forward_train(&shifted_input)?;
-            let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
+            let (loss, scaled_loss) = if args.gradient_checkpoint {
+                let mut ctx = checkpoint::CheckpointContext::new();
+                let (logits, attn_mask) =
+                    model.forward_train_with_checkpoint(&shifted_input, &mut ctx)?;
+                let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
+                let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
 
-            // Gradient accumulation: scale loss so the step-level total is
-            // roughly independent of grad_accum_steps.
-            let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
-
-            optim.backward_step(&scaled_loss)?;
+                // Drive the checkpointed backward: outer backward seeds grad
+                // at the post-layer-stack detach point, then each layer's
+                // forward is re-run in reverse with its Var grads
+                // accumulating into `grads`. Finally we hand `grads` to the
+                // optimizer directly instead of going through backward_step.
+                let mut grads = candle::backprop::GradStore::default();
+                scaled_loss.backward_into(&mut grads, None)?;
+                model.backward_through_checkpoints(&ctx, &mut grads, attn_mask.as_ref())?;
+                optim.step(&grads)?;
+                (loss, scaled_loss)
+            } else {
+                let logits = model.forward_train(&shifted_input)?;
+                let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
+                let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
+                optim.backward_step(&scaled_loss)?;
+                (loss, scaled_loss)
+            };
+            let _ = scaled_loss;
 
             accum_count += 1;
             accum_loss += loss.to_scalar::<f32>()?;

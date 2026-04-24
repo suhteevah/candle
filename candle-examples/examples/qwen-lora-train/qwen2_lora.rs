@@ -617,6 +617,69 @@ impl Model {
         xs.apply(&self.lm_head)
     }
 
+    /// Training forward pass with layer-boundary activation recomputation.
+    /// Returns `(logits, ctx, attention_mask)` — `ctx` records the per-layer
+    /// saved inputs and detached-output TensorIds needed for the backward
+    /// recompute; `attention_mask` is passed back so the backward driver
+    /// can re-use the exact same mask during each layer's recompute.
+    pub fn forward_train_with_checkpoint(
+        &mut self,
+        input_ids: &Tensor,
+        ctx: &mut crate::checkpoint::CheckpointContext,
+    ) -> Result<(Tensor, Option<Tensor>)> {
+        let (b_size, seq_len) = input_ids.dims2()?;
+        let attention_mask = if seq_len <= 1 {
+            None
+        } else {
+            Some(self.prepare_causal_attention_mask(b_size, seq_len, 0)?)
+        };
+        let xs = self.embed_tokens.forward(input_ids)?;
+        let mut current = xs;
+        let num_layers = self.layers.len();
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            let input_for_layer = current;
+            let out = layer.forward(&input_for_layer, attention_mask.as_ref(), 0, true)?;
+            if i + 1 < num_layers {
+                // Normal checkpoint boundary: detach output so the next
+                // layer sees a leaf and the activations for this layer can
+                // be dropped.
+                current = ctx.record_boundary(input_for_layer, out)?;
+            } else {
+                // Last layer: do NOT detach. Its output feeds directly into
+                // norm + lm_head + loss, so the backward graph must remain
+                // intact from loss through this layer's Vars. We still save
+                // the input so the outer backward's grad at this input can
+                // be used as upstream for layer N-2's recompute.
+                ctx.record_last_layer_input(input_for_layer.detach())?;
+                current = out;
+            }
+        }
+        let xs = current.apply(&self.norm)?;
+        let logits = xs.apply(&self.lm_head)?;
+        Ok((logits, attention_mask))
+    }
+
+    /// Drive the backward recompute for a run that used
+    /// `forward_train_with_checkpoint`. Must be called AFTER the outer
+    /// `loss.backward_into(&mut grads, None)` has populated the
+    /// post-layer-stack gradient.
+    pub fn backward_through_checkpoints(
+        &mut self,
+        ctx: &crate::checkpoint::CheckpointContext,
+        grads: &mut candle::backprop::GradStore,
+        attention_mask: Option<&Tensor>,
+    ) -> Result<()> {
+        let layers = &mut self.layers;
+        ctx.backward_through_segments(grads, |i, saved_input, upstream, grads| {
+            // Re-run the layer forward on the detached input; the fresh
+            // graph contains the layer's Var weights, so backward_into
+            // will accumulate their gradients in `grads`.
+            let fresh_out = layers[i].forward(saved_input, attention_mask, 0, true)?;
+            fresh_out.backward_into(grads, Some(upstream))?;
+            Ok(())
+        })
+    }
+
     pub fn clear_kv_cache(&mut self) {
         for layer in self.layers.iter_mut() {
             layer.clear_kv_cache()

@@ -71,8 +71,7 @@
 //! implementation is the next commit. Deliberately separated from the main
 //! file so the API can be reviewed before the model integration lands.
 
-use anyhow::Result;
-use candle::Tensor;
+use candle::{Result, Tensor};
 use candle_nn::VarMap;
 
 /// Per-layer state captured during the forward pass, consumed during the
@@ -96,7 +95,14 @@ pub struct LayerCheckpoint {
 /// the recompute.
 #[derive(Debug, Default)]
 pub struct CheckpointContext {
+    /// One entry per checkpointable unit EXCEPT the last (which is not
+    /// detached — its output feeds the loss directly so the backward graph
+    /// stays intact through its Vars).
     pub checkpoints: Vec<LayerCheckpoint>,
+    /// The last unit's input, saved for recompute. Its TensorId is where
+    /// the outer loss.backward_into's per-layer-N-1 grad-walk deposits the
+    /// gradient that seeds backward_through_segments's first iteration.
+    pub last_layer_input: Option<Tensor>,
 }
 
 impl CheckpointContext {
@@ -110,13 +116,26 @@ impl CheckpointContext {
     /// its id) and then drops — its intermediate activations die with it.
     pub fn record_boundary(&mut self, input: Tensor, output: Tensor) -> Result<Tensor> {
         let saved_input = input.detach();
-        let output_id = output.id();
         let detached_output = output.detach();
+        // Use the detached output's id — that's the leaf in the live forward
+        // graph, so that's where the outer backward's grad will land.
+        let output_id = detached_output.id();
         self.checkpoints.push(LayerCheckpoint {
             saved_input,
             output_id,
         });
         Ok(detached_output)
+    }
+
+    /// Save the last unit's input for backward recompute without detaching
+    /// the unit's output. The last unit's output feeds the loss directly,
+    /// so its backward graph must not be cut — but we still need the input
+    /// stored for recompute, and we need to know its TensorId so we can
+    /// pull the grad out of the outer GradStore to seed the per-segment
+    /// walk.
+    pub fn record_last_layer_input(&mut self, detached_input: Tensor) -> Result<()> {
+        self.last_layer_input = Some(detached_input);
+        Ok(())
     }
 
     /// Walk checkpoints in reverse, calling `recompute` for each. `recompute`
@@ -137,35 +156,51 @@ impl CheckpointContext {
             &mut candle::backprop::GradStore,
         ) -> Result<()>,
     {
-        let _ = grads;
-        let _ = &mut recompute;
-        // TODO: implement in the next commit. Pseudocode:
-        //
-        //   for i in (0..self.checkpoints.len()).rev() {
-        //       let cp = &self.checkpoints[i];
-        //       let upstream = grads
-        //           .remove_by_id(cp.output_id)
-        //           .ok_or_else(|| anyhow::anyhow!("no grad at layer {i} output — graph was cut somewhere unexpected"))?;
-        //       recompute(i, &cp.saved_input, upstream, grads)?;
-        //       // after recompute, grads now has an entry keyed on
-        //       // cp.saved_input.id() that we'll forward as the NEXT
-        //       // layer's upstream grad by pulling grads.remove_by_id(
-        //       // self.checkpoints[i-1].output_id).
-        //       //
-        //       // But wait — saved_input of layer i is NOT the same tensor
-        //       // as output of layer i-1. They share values but are different
-        //       // TensorIds because of the detach. We need to copy/alias the
-        //       // gradient: whatever arrived at saved_input[i], use as
-        //       // upstream for output[i-1].
-        //       //
-        //       // This is why `record_boundary` keeps output_id explicitly —
-        //       // so we can move the grad from saved_input[i].id to
-        //       // checkpoints[i-1].output_id between segments.
-        //   }
-        anyhow::bail!(
-            "CheckpointContext::backward_through_segments is a scaffold — \
-             implementation lands in the next commit. See module docstring."
-        )
+        if self.checkpoints.is_empty() {
+            return Ok(());
+        }
+        // The outer loss.backward_into has already deposited a gradient at
+        // last_layer_input's id (since the last layer's forward is in the
+        // loss graph). Move it to where backward_through_segments expects
+        // it — at checkpoints.last().output_id — which IS the same tensor
+        // value in the forward (last_layer_input was a detached copy of
+        // checkpoints.last().output), but with a different TensorId.
+        let last_input = self
+            .last_layer_input
+            .as_ref()
+            .ok_or_else(|| candle::Error::Msg(
+                "last_layer_input was not recorded — did forward_train_with_checkpoint \
+                 call record_last_layer_input for the final layer?".to_string()
+            ))?;
+        if let Some(seed) = grads.remove_by_id(last_input.id()) {
+            grads.insert_id(
+                self.checkpoints.last().unwrap().output_id,
+                seed,
+            );
+        }
+
+        for i in (0..self.checkpoints.len()).rev() {
+            let cp = &self.checkpoints[i];
+            let upstream = grads.remove_by_id(cp.output_id).ok_or_else(|| {
+                candle::Error::Msg(format!(
+                    "no gradient at checkpoint {i} output (id {:?}) — graph \
+                     was cut somewhere between this layer and the loss",
+                    cp.output_id
+                ))
+            })?;
+
+            recompute(i, &cp.saved_input, upstream, grads)?;
+
+            // Hand off the input gradient as the NEXT segment's upstream.
+            if i > 0 {
+                if let Some(input_grad) =
+                    grads.remove_by_id(self.checkpoints[i].saved_input.id())
+                {
+                    grads.insert_id(self.checkpoints[i - 1].output_id, input_grad);
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -778,6 +778,14 @@ impl GradStore {
         self.0.remove(&tensor.id())
     }
 
+    /// Remove the gradient tensor associated with the given TensorId. Needed
+    /// by gradient-checkpointing patterns where the tensor whose grad we
+    /// want has already been dropped — only its TensorId survives in the
+    /// checkpoint metadata.
+    pub fn remove_by_id(&mut self, id: TensorId) -> Option<Tensor> {
+        self.0.remove(&id)
+    }
+
     /// Insert a gradient tensor associated with the given tensor, returning the previous gradient tensor if it existed
     pub fn insert(&mut self, tensor: &Tensor, grad: Tensor) -> Option<Tensor> {
         self.0.insert(tensor.id(), grad)
