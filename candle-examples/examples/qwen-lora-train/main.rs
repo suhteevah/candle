@@ -22,6 +22,7 @@ use clap::Parser;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use tokenizers::Tokenizer;
 
@@ -98,6 +99,19 @@ struct Args {
     /// Log training metrics every N steps.
     #[arg(long, default_value_t = 10)]
     log_every: usize,
+
+    /// Save a training checkpoint every N steps (0 = disable intermediate
+    /// checkpoints; the final adapter is always written at the end).
+    /// Checkpoints land in `<output-dir>/checkpoints/step_<N>/`.
+    #[arg(long, default_value_t = 0)]
+    save_every: usize,
+
+    /// Resume training state from a checkpoint directory (written by an
+    /// earlier run's `--save-every`). Loads adapter weights + step counter.
+    /// AdamW momentum/variance state is reset — we checkpoint the adapter
+    /// weights only, not the optimizer's running statistics.
+    #[arg(long)]
+    resume_from: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -166,7 +180,7 @@ fn main() -> Result<()> {
     // delta tensor appears to break candle's autograd — gradients stopped
     // at the cast and never reached lora_A / lora_B. Keeping everything in
     // base dtype eliminates all casts in the forward path.
-    let lora_varmap = VarMap::new();
+    let mut lora_varmap = VarMap::new();
     let vb_lora = VarBuilder::from_varmap(&lora_varmap, dtype, &device);
 
     // --- build model ---
@@ -195,6 +209,30 @@ fn main() -> Result<()> {
         (num_trainable_params * 4) as f64 / (1024.0 * 1024.0)
     );
 
+    // --- resume from checkpoint if requested ---
+    let mut resume_step = 0usize;
+    if let Some(resume_dir) = &args.resume_from {
+        let adapter_path = resume_dir.join("adapter_model.safetensors");
+        if !adapter_path.exists() {
+            anyhow::bail!("resume checkpoint missing adapter_model.safetensors: {adapter_path:?}");
+        }
+        lora_varmap
+            .load(&adapter_path)
+            .with_context(|| format!("load adapter from {adapter_path:?}"))?;
+        let step_file = resume_dir.join("step.txt");
+        if step_file.exists() {
+            resume_step = std::fs::read_to_string(&step_file)?
+                .trim()
+                .parse()
+                .context("parse step.txt")?;
+        }
+        eprintln!(
+            "  resumed from   : {} at step {}",
+            resume_dir.display(),
+            resume_step
+        );
+    }
+
     // --- optimizer ---
     let adamw_params = candle_nn::ParamsAdamW {
         lr: args.learning_rate,
@@ -203,8 +241,8 @@ fn main() -> Result<()> {
     let mut optim = candle_nn::AdamW::new(lora_varmap.all_vars(), adamw_params)?;
 
     // --- training loop ---
-    let mut rng = StdRng::seed_from_u64(args.seed);
-    let mut step = 0usize;
+    let mut rng = StdRng::seed_from_u64(args.seed.wrapping_add(resume_step as u64));
+    let mut step = resume_step;
     let mut accum_count = 0usize;
     let mut accum_loss = 0f32;
     let total_micro_batches = args.max_steps * args.grad_accum_steps;
@@ -261,6 +299,21 @@ fn main() -> Result<()> {
                 }
                 accum_count = 0;
                 accum_loss = 0.0;
+
+                // Intermediate checkpoint — weights + step counter. We
+                // reuse the adapter save format, so a checkpoint dir is
+                // just a mid-training adapter that you can point at with
+                // --resume-from.
+                if args.save_every > 0 && step % args.save_every == 0 {
+                    let ckpt_dir = args
+                        .output_dir
+                        .join("checkpoints")
+                        .join(format!("step_{step}"));
+                    save_checkpoint(&ckpt_dir, &lora_varmap, &peft_cfg_stub(&args, &targets), step)
+                        .with_context(|| format!("save checkpoint to {ckpt_dir:?}"))?;
+                    eprintln!("  checkpoint: {}", ckpt_dir.display());
+                }
+
                 if step >= args.max_steps {
                     break 'outer;
                 }
@@ -287,6 +340,35 @@ fn main() -> Result<()> {
     adapter::save_adapter(&args.output_dir, &peft_cfg, &lora_varmap)?;
     eprintln!("adapter saved to {}", args.output_dir.display());
 
+    Ok(())
+}
+
+/// Build a stub PeftAdapterConfig for mid-training checkpoints, cloned from
+/// the CLI args. The stub is adequate for resume (matches production config
+/// exactly) and for basic inspection.
+fn peft_cfg_stub(args: &Args, targets: &HashSet<qwen2_lora::TargetModule>) -> PeftAdapterConfig {
+    let mut names: Vec<String> = targets.iter().map(|t| t.as_str().to_string()).collect();
+    names.sort();
+    PeftAdapterConfig::new(
+        args.base_dir.to_string_lossy().into_owned(),
+        args.rank,
+        args.alpha,
+        args.dropout,
+        names,
+    )
+}
+
+/// Write an intermediate training checkpoint: adapter weights + step.txt.
+/// Reuses the PEFT-compatible save layout so you can inspect or resume from
+/// any intermediate with the standard tooling.
+fn save_checkpoint(
+    dir: &std::path::Path,
+    varmap: &VarMap,
+    cfg: &PeftAdapterConfig,
+    step: usize,
+) -> Result<()> {
+    adapter::save_adapter(dir, cfg, varmap)?;
+    std::fs::write(dir.join("step.txt"), step.to_string())?;
     Ok(())
 }
 
