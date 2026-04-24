@@ -163,9 +163,34 @@ impl Tensor {
     }
 
     pub fn backward(&self) -> Result<GradStore> {
-        let sorted_nodes = self.sorted_nodes();
         let mut grads = GradStore::new();
-        grads.insert(self, self.ones_like()?.contiguous()?);
+        self.backward_into(&mut grads, None)?;
+        Ok(grads)
+    }
+
+    /// Backward pass into an externally-supplied `GradStore`. Like `backward`
+    /// but accumulates gradients into the caller's store instead of returning
+    /// a fresh one, and allows seeding a non-ones upstream gradient.
+    ///
+    /// This unblocks composable-backward patterns — most importantly
+    /// gradient/activation checkpointing, where an inner `CustomOp` wants to
+    /// recompute a sub-forward during its own `bwd` and have the inner
+    /// backward's Var gradients accumulate into the outer training loop's
+    /// GradStore.
+    ///
+    /// `grad_seed`: the gradient flowing into `self`. If `None`, uses
+    /// `ones_like(self)` — equivalent to treating `self` as a scalar loss.
+    pub fn backward_into(
+        &self,
+        grads: &mut GradStore,
+        grad_seed: Option<Tensor>,
+    ) -> Result<()> {
+        let sorted_nodes = self.sorted_nodes();
+        let seed = match grad_seed {
+            Some(g) => g,
+            None => self.ones_like()?.contiguous()?,
+        };
+        grads.insert(self, seed);
         for node in sorted_nodes.iter() {
             if node.is_variable() {
                 continue;
@@ -724,7 +749,7 @@ impl Tensor {
                 };
             }
         }
-        Ok(grads)
+        Ok(())
     }
 }
 
