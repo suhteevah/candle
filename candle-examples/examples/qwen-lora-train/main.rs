@@ -14,6 +14,7 @@ mod adapter;
 mod bench;
 mod checkpoint;
 mod dataset;
+mod fused_ops;
 mod lora;
 mod prefetch;
 mod qwen2_lora;

@@ -412,9 +412,10 @@ impl Attention {
             } else {
                 attn_weights.to_dtype(DType::F32)?
             };
-            // Use the differentiable softmax (built from max+sub+exp+sum+div
-            // with full autograd support) instead of softmax_last_dim (no_bwd).
-            let attn_weights = candle_nn::ops::softmax(&attn_weights, D::Minus1)?;
+            // Fused softmax with analytical backward — caches only the
+            // softmax output (1 tensor) vs the composed path's 5
+            // intermediates. Shipped in crate::fused_ops.
+            let attn_weights = crate::fused_ops::fused_softmax_last_dim(&attn_weights)?;
             let attn_weights = if attn_weights.dtype() == value_states.dtype() {
                 attn_weights
             } else {

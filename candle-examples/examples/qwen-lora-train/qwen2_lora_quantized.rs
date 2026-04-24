@@ -187,7 +187,7 @@ impl QLoRAAttention {
             } else {
                 att.to_dtype(DType::F32)?
             };
-            let sm = candle_nn::ops::softmax(&att32, D::Minus1)?;
+            let sm = crate::fused_ops::fused_softmax_last_dim(&att32)?;
             if orig == DType::F32 {
                 sm
             } else {
