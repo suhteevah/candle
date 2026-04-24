@@ -781,6 +781,40 @@ impl crate::CustomOp1 for QTensor {
         "qmatmul"
     }
 
+    /// Backward pass for the quantized matmul `y = x @ dequant(W)^T`.
+    ///
+    /// Upstream gradient wrt `y` has shape `[..., N]` (batched), `W` has
+    /// shape `(N, K)` after dequantization. The gradient wrt the input
+    /// `x` is `grad_x = grad_y @ W` (shape `[..., K]`, matching `x`).
+    ///
+    /// The base weight `W` is frozen — this op does NOT return a gradient
+    /// wrt the quantized weight itself (there's no meaningful notion of
+    /// one without a dequantize-quantize-update loop, which is a separate
+    /// research problem). For QLoRA-style training where the base is
+    /// frozen and LoRA adapters carry all trainable state, returning only
+    /// `grad_x` is exactly what's needed.
+    ///
+    /// Memory cost: we dequantize `W` on the fly into a temporary fp16
+    /// (preserving `grad_res`'s dtype when possible). For a Qwen2.5-7B
+    /// attention projection (4096x4096) that's ~32MB per matmul, dropped
+    /// after the matmul completes. Across all layers' backward, peak
+    /// overhead is one layer's worth at a time due to Rust RAII.
+    fn bwd(
+        &self,
+        _arg: &Tensor,
+        _res: &Tensor,
+        grad_res: &Tensor,
+    ) -> Result<Option<Tensor>> {
+        let w = self.dequantize(grad_res.device())?;
+        let w = if w.dtype() != grad_res.dtype() {
+            w.to_dtype(grad_res.dtype())?
+        } else {
+            w
+        };
+        let grad_input = grad_res.matmul(&w)?;
+        Ok(Some(grad_input))
+    }
+
     fn cpu_fwd(
         &self,
         storage: &crate::CpuStorage,
@@ -861,10 +895,70 @@ impl crate::CustomOp1 for QTensor {
     }
 }
 
+/// Thin CustomOp1 wrapper around `Arc<QTensor>` so QMatMul's forward path
+/// can call `apply_op1` (the backward-enabled variant) instead of
+/// `apply_op1_no_bwd`. The wrapper just delegates every method to the
+/// underlying QTensor — including the new `bwd` impl that dequantizes W
+/// on-the-fly for the gradient computation.
+///
+/// Why a wrapper and not a direct `apply_op1(qtensor)` call: `apply_op1`
+/// takes `C: 'static + CustomOp1 + Send + Sync` by value, and we only
+/// have `&Arc<QTensor>` in `QMatMul::forward`. Cloning an entire QTensor
+/// per forward call would be expensive (quantized weights are GB-sized);
+/// cloning an Arc is cheap. The wrapper lets us pass ownership of a
+/// cheap Arc handle while preserving the backward semantics.
+struct QMatmulBwdOp(std::sync::Arc<QTensor>);
+
+impl crate::CustomOp1 for QMatmulBwdOp {
+    fn name(&self) -> &'static str {
+        "qmatmul"
+    }
+
+    fn cpu_fwd(
+        &self,
+        storage: &crate::CpuStorage,
+        layout: &crate::Layout,
+    ) -> Result<(crate::CpuStorage, Shape)> {
+        self.0.cpu_fwd(storage, layout)
+    }
+
+    fn cuda_fwd(
+        &self,
+        storage: &crate::CudaStorage,
+        layout: &crate::Layout,
+    ) -> Result<(crate::CudaStorage, Shape)> {
+        self.0.cuda_fwd(storage, layout)
+    }
+
+    fn metal_fwd(
+        &self,
+        storage: &crate::MetalStorage,
+        layout: &crate::Layout,
+    ) -> Result<(crate::MetalStorage, Shape)> {
+        self.0.metal_fwd(storage, layout)
+    }
+
+    fn bwd(
+        &self,
+        arg: &Tensor,
+        res: &Tensor,
+        grad_res: &Tensor,
+    ) -> Result<Option<Tensor>> {
+        <QTensor as crate::CustomOp1>::bwd(&self.0, arg, res, grad_res)
+    }
+}
+
 impl crate::Module for QMatMul {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         match self {
-            Self::QTensor(t) => xs.apply_op1_no_bwd(t.as_ref()),
+            // Was: xs.apply_op1_no_bwd(t.as_ref()) — cut the autograd graph.
+            // Now routes through apply_op1 via a QMatmulBwdOp wrapper so
+            // the QTensor's analytical `bwd` implementation is used when
+            // gradient flows through this op. This is the core enabler for
+            // QLoRA-style training on candle (frozen 4-bit base + trainable
+            // LoRA adapters; gradient flows through the quantized layers
+            // without having to dequantize the entire base model up-front).
+            Self::QTensor(t) => xs.apply_op1(QMatmulBwdOp(std::sync::Arc::clone(t))),
             Self::Tensor(w) => {
                 let w = match *xs.dims() {
                     [b1, b2, _, _] => w.broadcast_left((b1, b2))?.t()?,
