@@ -11,6 +11,7 @@ extern crate intel_mkl_src;
 extern crate accelerate_src;
 
 mod adapter;
+mod checkpoint;
 mod dataset;
 mod lora;
 mod qwen2_lora;
