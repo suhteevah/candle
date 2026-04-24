@@ -298,9 +298,18 @@ impl Model {
             std::sync::Arc::new(ct.tensor(reader, "output_norm.weight", device)?),
             rms_eps,
         )?;
-        let output = match ct.tensor(reader, "output.weight", device) {
-            Ok(v) => QMatMul::from_qtensor(v)?,
-            _ => QMatMul::from_qtensor(ct.tensor(reader, "token_embd.weight", device)?)?,
+        // Output layer (lm_head): pre-dequantize to fp16 at load time.
+        // Rationale: this is the largest single weight (hidden × vocab ≈
+        // 2.2GB fp32 for 7B). If left quantized, every backward pass
+        // through it would transiently allocate a full fp32 dequant tensor
+        // and OOM an 8GB card. Pre-dequantizing to F16 costs 1.1GB
+        // persistent VRAM but avoids the transient spike — net win.
+        let output = {
+            let qt = ct
+                .tensor(reader, "output.weight", device)
+                .or_else(|_| ct.tensor(reader, "token_embd.weight", device))?;
+            let t_f16 = qt.dequantize_f16(device)?;
+            QMatMul::TensorF16(t_f16)
         };
         let (cos, sin) = precomput_freqs_cis(head_dim, rope_freq, context_length, device)?;
 
