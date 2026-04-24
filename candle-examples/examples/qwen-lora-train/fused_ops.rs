@@ -27,31 +27,20 @@
 //! runs the analytical formula. Peak memory during backward = just `y`.
 
 use candle::backend::BackendStorage;
-use candle::{CpuStorage, CustomOp1, Layout, Result, Shape, Tensor, D};
+use candle::{CpuStorage, CustomOp1, DType, Layout, Module, Result, Shape, Tensor, D};
 
 /// Softmax over the last dimension with a compact analytical backward.
 ///
 /// Drop-in replacement for `candle_nn::ops::softmax(xs, D::Minus1)?` on
 /// the training hot path. At inference time it's roughly equivalent.
 pub fn fused_softmax_last_dim(xs: &Tensor) -> Result<Tensor> {
-    // For the forward value we can just reuse the existing composed path
-    // (no_bwd variant is slightly cheaper but we want graph connectivity
-    // for our own bwd callback). Use the standard ops::softmax which
-    // returns a tensor y with identity equal to what our analytical bwd
-    // expects.
-    //
-    // Strategy: compute y via candle_nn::ops::softmax (composed), then
-    // rewrap via apply_op1 registering SoftmaxBwd which discards the
-    // composed graph and uses our analytical bwd instead.
-    //
-    // This saves memory because the composed intermediates go out of
-    // scope after this fn returns — only `y` (the final output of the
-    // composed chain) is live, and our CustomOp1 output aliases it.
     let y = candle_nn::ops::softmax(xs, D::Minus1)?;
-    // Re-wrap via a custom op whose output is the IDENTITY of y but whose
-    // backward uses the analytical formula and depends ONLY on y, not on
-    // the composed intermediates.
-    xs.apply_op1(SoftmaxAnalytical { y: y.clone() })
+    // Detach y before caching so the composed forward's 5 intermediates
+    // can drop immediately (they're only reachable via y's BackpropOp
+    // chain; detach severs that, Rust RAII does the rest).
+    let y_cached = y.detach();
+    drop(y); // explicit: y's BackpropOp → composed intermediates die now
+    xs.apply_op1(SoftmaxAnalytical { y: y_cached })
 }
 
 /// CustomOp1 whose forward is `identity(x)` evaluated as softmax(x) via
@@ -115,3 +104,125 @@ impl CustomOp1 for SoftmaxAnalytical {
         Ok(Some(gx))
     }
 }
+
+// ============================================================================
+// Stage 2: Fused RMSNorm
+// ============================================================================
+//
+// Composed reference: `candle_nn::ops::rms_norm_slow` does sqr + sum_keepdim
+// + div + sqrt + broadcast_div + broadcast_mul — 5-6 intermediate tensors.
+//
+// Our fused op computes the same forward value (via the composed path, once)
+// but registers a CustomOp1 that caches only `x` (the input) + α (the
+// frozen weight) + ε for the analytical backward. No intermediates retained.
+//
+// Analytical backward (frozen α, so no grad wrt α):
+//   Let r_b = 1 / sqrt( mean_j(x_j²) + ε )   (one scalar per batch position)
+//   y_i = r_b * α_i * x_i
+//   ∂L/∂x_i = r_b * α_i * ∂L/∂y_i
+//             − r_b³ * x_i * mean_j( α_j * x_j * ∂L/∂y_j )
+//
+// Cache during training: only `x` and `α` (and `ε` is just f32).
+
+/// Fused RMSNorm over the last dim, with α (weight) assumed frozen.
+///
+/// `alpha` should be shape [hidden]; broadcasts over all leading dims of x.
+pub fn fused_rms_norm(x: &Tensor, alpha: &Tensor, eps: f32) -> Result<Tensor> {
+    let y = candle_nn::ops::rms_norm_slow(x, alpha, eps)?;
+    // Detach the cached forward output so composed intermediates drop.
+    let y_cached = y.detach();
+    drop(y);
+    // x we keep live (it's the input; its id is how the outer walker
+    // accumulates our returned grad_x, so we can't detach this one).
+    // alpha is frozen (not a Var), cheap clone.
+    let op = RmsNormAnalytical {
+        y: y_cached,
+        x: x.clone(),
+        alpha: alpha.clone(),
+        eps,
+    };
+    x.apply_op1(op)
+}
+
+#[derive(Debug, Clone)]
+struct RmsNormAnalytical {
+    y: Tensor,
+    x: Tensor,
+    alpha: Tensor,
+    eps: f32,
+}
+
+impl CustomOp1 for RmsNormAnalytical {
+    fn name(&self) -> &'static str {
+        "fused_rms_norm"
+    }
+
+    fn cpu_fwd(&self, _storage: &CpuStorage, layout: &Layout) -> Result<(CpuStorage, Shape)> {
+        let src_storage = self.y.storage_and_layout().0;
+        match &*src_storage {
+            candle::Storage::Cpu(cpu) => Ok((cpu.clone(), layout.shape().clone())),
+            _ => candle::bail!("RmsNormAnalytical cpu_fwd called with non-cpu cached y"),
+        }
+    }
+
+    fn cuda_fwd(
+        &self,
+        _storage: &candle::CudaStorage,
+        layout: &Layout,
+    ) -> Result<(candle::CudaStorage, Shape)> {
+        let src_storage = self.y.storage_and_layout().0;
+        match &*src_storage {
+            candle::Storage::Cuda(cu) => Ok((cu.try_clone(self.y.layout())?, layout.shape().clone())),
+            _ => candle::bail!("RmsNormAnalytical cuda_fwd called with non-cuda cached y"),
+        }
+    }
+
+    fn bwd(&self, _arg: &Tensor, _res: &Tensor, grad_res: &Tensor) -> Result<Option<Tensor>> {
+        // Work in fp32 internally for numerical stability; cast back at the
+        // end to the input x's dtype.
+        let orig_dtype = self.x.dtype();
+        let x = if orig_dtype == DType::F32 {
+            self.x.clone()
+        } else {
+            self.x.to_dtype(DType::F32)?
+        };
+        let alpha = if self.alpha.dtype() == DType::F32 {
+            self.alpha.clone()
+        } else {
+            self.alpha.to_dtype(DType::F32)?
+        };
+        let gy = if grad_res.dtype() == DType::F32 {
+            grad_res.clone()
+        } else {
+            grad_res.to_dtype(DType::F32)?
+        };
+
+        let hidden = x.dim(D::Minus1)? as f64;
+        // r_b keepdim [..., 1]
+        let mean_sq = (x.sqr()?.sum_keepdim(D::Minus1)? / hidden)?;
+        let r = (mean_sq + self.eps as f64)?.sqrt()?.recip()?;
+
+        // term1: r_b * α_i * gy_i
+        let alpha_gy = gy.broadcast_mul(&alpha)?;
+        let term1 = alpha_gy.broadcast_mul(&r)?;
+
+        // term2: r_b³ * x_i * mean_j(α_j * x_j * gy_j)
+        let alpha_x_gy = alpha_gy.mul(&x)?;
+        let mean_agx = (alpha_x_gy.sum_keepdim(D::Minus1)? / hidden)?;
+        let r3 = (&r * &r)?.mul(&r)?;
+        let scale = r3.broadcast_mul(&mean_agx)?;
+        let term2 = x.broadcast_mul(&scale)?;
+
+        let gx = (term1 - term2)?;
+        let gx = if gx.dtype() != orig_dtype {
+            gx.to_dtype(orig_dtype)?
+        } else {
+            gx
+        };
+        Ok(Some(gx))
+    }
+}
+
+// Silence unused-import warning from Module import used for signature
+#[allow(dead_code)]
+fn _module_fence<M: Module>(_: M) {}
