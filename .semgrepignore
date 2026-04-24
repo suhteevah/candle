@@ -1,0 +1,16 @@
+# candle fork — matt-voice-lora branch
+#
+# The Actix-flavored "path traversal" and "SSRF" rules in the default ruleset
+# fire on plain path-join / reqwest::get patterns in Rust code that is NOT an
+# HTTP server. Our qwen-lora-train example is a local CLI that:
+#   - builds file paths from sanitized + canonicalized + contained inputs
+#     (see ensure_within_dir in main.rs, and the equivalent check in
+#     craig-poller::extract_matt_track)
+#   - performs no HTTP serving
+#
+# The rules pattern-match AST shapes and don't trace the containment
+# validation. Scoped-out here rather than inline-nosemgrep'd on every line.
+# If candle-examples grows a real HTTP handler, revisit — don't blanket-ignore.
+
+candle-examples/examples/qwen-lora-train/main.rs
+candle-examples/examples/qwen-lora-train/adapter.rs
