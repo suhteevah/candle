@@ -14,7 +14,9 @@ mod adapter;
 mod checkpoint;
 mod dataset;
 mod lora;
+mod prefetch;
 mod qwen2_lora;
+mod xentropy;
 
 use anyhow::{Context, Result};
 use candle::{DType, Tensor};
@@ -25,6 +27,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use adapter::PeftAdapterConfig;
@@ -122,6 +125,30 @@ struct Args {
     /// unlock longer sequences or more target modules.
     #[arg(long)]
     gradient_checkpoint: bool,
+
+    /// Sequence-tile size for cross-entropy computation. The full logits
+    /// tensor `[B, L, V]` can be 100-300MB at Qwen vocab; tiling along L
+    /// means peak = `chunk × V` instead. 0 disables tiling.
+    ///
+    /// KNOWN ISSUE: values > 0 currently cause a training stall (GPU util
+    /// drops to ~8% and no progress is made). The cause is under
+    /// investigation — likely candle allocator thrash on the per-chunk
+    /// logits alloc/free churn OR a subtle autograd interaction with the
+    /// cross-chunk sum accumulator. Default is 0 until this is root-caused.
+    #[arg(long, default_value_t = 0)]
+    ce_chunk_size: usize,
+
+    /// Bounded queue depth for the background tokenization prefetcher.
+    /// Bigger = more overlap headroom, costs a few KB of CPU memory per
+    /// slot. Zero disables prefetch and runs tokenization inline.
+    ///
+    /// KNOWN ISSUE: values > 0 currently cause a training stall when
+    /// combined with certain configs. The prefetch thread + main thread
+    /// CUDA context interaction is under investigation. Default is 0
+    /// until this is root-caused. Inline tokenization is fast enough for
+    /// Qwen-length Discord inputs anyway.
+    #[arg(long, default_value_t = 0)]
+    prefetch_queue: usize,
 }
 
 fn main() -> Result<()> {
@@ -251,21 +278,65 @@ fn main() -> Result<()> {
     let mut optim = candle_nn::AdamW::new(lora_varmap.all_vars(), adamw_params)?;
 
     // --- training loop ---
-    let mut rng = StdRng::seed_from_u64(args.seed.wrapping_add(resume_step as u64));
     let mut step = resume_step;
     let mut accum_count = 0usize;
     let mut accum_loss = 0f32;
     let total_micro_batches = args.max_steps * args.grad_accum_steps;
 
-    eprintln!("\n=== training ===");
-    'outer: for _epoch in 0..usize::MAX {
-        // simple uniform sampling w/ replacement — keep it simple for v1
-        let mut indices: Vec<usize> = (0..dataset.len()).collect();
-        indices.shuffle(&mut rng);
+    // Share dataset + tokenizer across prefetch worker and (potentially) fallback path.
+    let dataset = Arc::new(dataset);
+    let tokenizer = Arc::new(tokenizer);
 
-        for &i in indices.iter() {
-            let pair = dataset.get(i);
-            let tok = dataset::tokenize_pair(&tokenizer, pair, args.max_seq_len)?;
+    let prefetcher = if args.prefetch_queue > 0 {
+        Some(prefetch::Prefetcher::new(
+            dataset.clone(),
+            tokenizer.clone(),
+            args.max_seq_len,
+            args.seed.wrapping_add(resume_step as u64),
+            args.prefetch_queue,
+        ))
+    } else {
+        None
+    };
+    eprintln!(
+        "  prefetch       : {}",
+        if prefetcher.is_some() {
+            format!("on (queue={})", args.prefetch_queue)
+        } else {
+            "off (inline)".to_string()
+        }
+    );
+    eprintln!("  ce chunk size  : {}", args.ce_chunk_size);
+
+    let mut fallback_rng = StdRng::seed_from_u64(args.seed.wrapping_add(resume_step as u64));
+    let mut fallback_indices: Vec<usize> = (0..dataset.len()).collect();
+    fallback_indices.shuffle(&mut fallback_rng);
+    let mut fallback_cursor = 0usize;
+
+    eprintln!("\n=== training ===");
+    'outer: loop {
+        loop {
+            // Pull next tokenized example: from the prefetch queue when
+            // available, else tokenize inline.
+            let tok = if let Some(pf) = &prefetcher {
+                match pf.next() {
+                    Some(Ok(t)) => t,
+                    Some(Err(e)) => {
+                        eprintln!("prefetch tokenize error: {e:#}");
+                        continue;
+                    }
+                    None => break 'outer, // worker thread exited
+                }
+            } else {
+                if fallback_cursor >= fallback_indices.len() {
+                    fallback_indices.shuffle(&mut fallback_rng);
+                    fallback_cursor = 0;
+                }
+                let idx = fallback_indices[fallback_cursor];
+                fallback_cursor += 1;
+                dataset::tokenize_pair(&tokenizer, dataset.get(idx), args.max_seq_len)?
+            };
+
             if tok.input_ids.len() < 2 {
                 continue; // nothing to predict
             }
@@ -284,9 +355,15 @@ fn main() -> Result<()> {
 
             let (loss, scaled_loss) = if args.gradient_checkpoint {
                 let mut ctx = checkpoint::CheckpointContext::new();
-                let (logits, attn_mask) =
+                let (hidden, attn_mask) =
                     model.forward_train_with_checkpoint(&shifted_input, &mut ctx)?;
-                let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
+                let loss = xentropy::tiled_cross_entropy(
+                    &hidden,
+                    model.lm_head(),
+                    &shifted_target,
+                    &shifted_mask,
+                    args.ce_chunk_size,
+                )?;
                 let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
 
                 // Drive the checkpointed backward: outer backward seeds grad
@@ -300,8 +377,14 @@ fn main() -> Result<()> {
                 optim.step(&grads)?;
                 (loss, scaled_loss)
             } else {
-                let logits = model.forward_train(&shifted_input)?;
-                let loss = masked_cross_entropy(&logits, &shifted_target, &shifted_mask)?;
+                let hidden = model.forward_train(&shifted_input)?;
+                let loss = xentropy::tiled_cross_entropy(
+                    &hidden,
+                    model.lm_head(),
+                    &shifted_target,
+                    &shifted_mask,
+                    args.ce_chunk_size,
+                )?;
                 let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
                 optim.backward_step(&scaled_loss)?;
                 (loss, scaled_loss)
@@ -347,6 +430,7 @@ fn main() -> Result<()> {
             }
         }
     }
+    drop(prefetcher); // shut worker thread down cleanly before we print final stats
 
     eprintln!("\n=== saving adapter ===");
     let targets_sorted: Vec<String> = {

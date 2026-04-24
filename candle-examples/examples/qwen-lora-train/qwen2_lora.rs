@@ -599,9 +599,12 @@ impl Model {
             .to_dtype(self.dtype)
     }
 
-    /// Training forward pass — returns full-sequence logits `[B, L, V]` so
-    /// the training loop can compute token-level cross-entropy with a loss
-    /// mask.
+    /// Training forward pass — returns post-norm hidden `[B, L, H]` so the
+    /// caller can decide whether to materialize full `[B, L, V]` logits or
+    /// tile-apply lm_head via `xentropy::tiled_cross_entropy`. This is the
+    /// single biggest VRAM-savings lever in LoRA training — the logits
+    /// allocation at Qwen vocab size can be 100-300MB, sitting live for
+    /// the whole backward pass.
     pub fn forward_train(&mut self, input_ids: &Tensor) -> Result<Tensor> {
         let (b_size, seq_len) = input_ids.dims2()?;
         let attention_mask = if seq_len <= 1 {
@@ -613,8 +616,12 @@ impl Model {
         for layer in self.layers.iter_mut() {
             xs = layer.forward(&xs, attention_mask.as_ref(), 0, true)?;
         }
-        let xs = xs.apply(&self.norm)?;
-        xs.apply(&self.lm_head)
+        xs.apply(&self.norm)
+    }
+
+    /// Accessor for the caller-side lm_head application (used by tiled CE).
+    pub fn lm_head(&self) -> &candle_nn::Linear {
+        &self.lm_head
     }
 
     /// Training forward pass with layer-boundary activation recomputation.
@@ -655,8 +662,10 @@ impl Model {
             }
         }
         let xs = current.apply(&self.norm)?;
-        let logits = xs.apply(&self.lm_head)?;
-        Ok((logits, attention_mask))
+        // Return post-norm HIDDEN state instead of post-lm_head logits.
+        // Caller decides whether to tile-apply lm_head (tiled_cross_entropy)
+        // or materialize full [B, L, V] logits at once.
+        Ok((xs, attention_mask))
     }
 
     /// Drive the backward recompute for a run that used
