@@ -447,3 +447,15 @@ If you encounter an error like this one `called `Result::unwrap()` on an `Err` v
 `c:\Windows\System32\nvcuda.dll` -> `cuda.dll`
 `c:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\cublas64_12.dll` -> `cublas.dll`
 `c:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\curand64_10.dll` -> `curand.dll`
+
+---
+
+## Support This Project
+
+If you find this project useful, consider buying me a coffee! Your support helps me keep building and sharing open-source tools.
+
+[![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal)](https://www.paypal.me/baal_hosting)
+
+**PayPal:** [baal_hosting@live.com](https://paypal.me/baal_hosting)
+
+Every donation, no matter how small, is greatly appreciated and motivates continued development. Thank you!

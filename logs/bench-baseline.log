@@ -1,0 +1,18 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base dir       : C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\bench-baseline
+  LoRA r/α/drop  : 8 / 16 / 0.05
+  target modules : q_proj,v_proj
+  batch×accum=eff: 1×4=4  lr=2.00e-4  max_steps=500
+  model          : 28 layers, hidden=1536 heads=12 kv_heads=2
+  dataset        : 46407 pairs
+  base shards    : 1
+  LoRA adapters  : 2 projection types × 28 layers = 56 total
+  trainable params: 1089536 (4.16 MB @ fp32)
+  prefetch       : off (inline)
+  ce chunk size  : 0
+  mode           : BENCHMARK (3 warmup + 20 measured steps)
+Error: DriverError(CUDA_ERROR_OUT_OF_MEMORY, "out of memory")

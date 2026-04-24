@@ -1,0 +1,518 @@
+    Updating crates.io index
+     Locking 731 packages to latest compatible versions
+      Adding cpal v0.15.3 (available: v0.17.3)
+      Adding enterpolation v0.2.1 (available: v0.3.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding getrandom v0.2.17 (available: v0.4.2)
+      Adding getrandom v0.3.4 (available: v0.4.2)
+      Adding gloo v0.11.0 (available: v0.12.0)
+      Adding hf-hub v0.4.3 (available: v0.5.0)
+      Adding oci-spec v0.6.7 (available: v0.6.8)
+      Adding parquet v57.3.0 (available: v58.1.0)
+      Adding pyo3 v0.27.2 (available: v0.28.3)
+      Adding pyo3-build-config v0.27.2 (available: v0.28.3)
+      Adding rand v0.9.4 (available: v0.10.1)
+      Adding rand_distr v0.5.1 (available: v0.6.0)
+      Adding rubato v1.0.1 (available: v2.0.0)
+      Adding wasm-streams v0.4.1 (available: v0.4.2)
+      Adding web-sys v0.3.70 (available: v0.3.95)
+      Adding yew v0.20.0 (available: v0.23.0)
+      Adding yew-agent v0.2.0 (available: v0.5.0)
+      Adding zip v7.2.0 (available: v8.5.1)
+ Downloading crates ...
+  Downloaded alloca v0.4.0
+  Downloaded boolinator v2.4.0
+  Downloaded rayon-cond v0.4.0
+  Downloaded pulp-wasm-simd-flag v0.1.0
+  Downloaded gemm-c64 v0.19.0
+  Downloaded wasm-logger v0.2.0
+  Downloaded gemm-c32 v0.18.2
+  Downloaded monostate v0.1.18
+  Downloaded gemm-f64 v0.18.2
+  Downloaded pyo3-macros v0.27.2
+  Downloaded macro_rules_attribute-proc_macro v0.2.2
+  Downloaded macro_rules_attribute v0.2.2
+  Downloaded gemm-f32 v0.19.0
+  Downloaded prokio v0.1.0
+  Downloaded yoke-derive v0.7.5
+  Downloaded wasm-bindgen-test-shared v0.2.118
+  Downloaded tracing-chrome v0.7.2
+  Downloaded reborrow v0.5.5
+  Downloaded page_size v0.6.0
+  Downloaded pinned v0.1.0
+  Downloaded monostate-impl v0.1.18
+  Downloaded gloo-storage v0.2.2
+  Downloaded gloo-history v0.1.5
+  Downloaded gloo-worker-macros v0.1.0
+  Downloaded integer-encoding v3.0.4
+  Downloaded memo-map v0.3.3
+  Downloaded yew-agent v0.2.0
+  Downloaded wasm-bindgen-test-macro v0.3.68
+  Downloaded unindent v0.2.4
+  Downloaded gloo-timers v0.2.6
+  Downloaded gloo-render v0.2.0
+  Downloaded gloo-console v0.3.0
+  Downloaded serde_plain v1.0.2
+  Downloaded serde-wasm-bindgen v0.6.5
+  Downloaded which v7.0.3
+  Downloaded ug-cuda v0.5.0
+  Downloaded onig v6.5.1
+  Downloaded safetensors v0.4.5
+  Downloaded gloo-timers v0.3.0
+  Downloaded implicit-clone v0.3.10
+  Downloaded snap v1.1.1
+  Downloaded serde-wasm-bindgen v0.5.0
+  Downloaded twox-hash v2.1.2
+  Downloaded yoke v0.7.5
+  Downloaded rand_distr v0.5.1
+  Downloaded pyo3-build-config v0.27.2
+  Downloaded gloo-storage v0.3.0
+  Downloaded gemm-f32 v0.18.2
+  Downloaded gloo-file v0.2.3
+  Downloaded gemm-f16 v0.19.0
+  Downloaded thrift v0.17.0
+  Downloaded gemm-f16 v0.18.2
+  Downloaded gloo-render v0.1.1
+  Downloaded safetensors v0.7.0
+  Downloaded prettyplease v0.1.25
+  Downloaded wasm-bindgen-test v0.3.68
+  Downloaded ug v0.5.0
+  Downloaded gemm-c64 v0.18.2
+  Downloaded gloo-events v0.1.2
+  Downloaded gloo-file v0.3.0
+  Downloaded gloo-utils v0.1.7
+  Downloaded gloo-events v0.2.0
+  Downloaded gloo-dialogs v0.2.0
+  Downloaded gloo-dialogs v0.1.1
+  Downloaded gloo-console v0.2.3
+  Downloaded dyn-stack-macros v0.1.3
+  Downloaded safe_arch v0.7.4
+  Downloaded gemm-f64 v0.19.0
+  Downloaded unicode_categories v0.1.1
+  Downloaded yew-macro v0.20.0
+  Downloaded unicode-normalization-alignments v0.1.12
+  Downloaded simba v0.9.1
+  Downloaded typenum v1.20.0
+  Downloaded csv-core v0.1.13
+  Downloaded pyo3-ffi v0.27.2
+  Downloaded wide v0.7.33
+  Downloaded zip v7.2.0
+  Downloaded pulp v0.22.2
+  Downloaded pulp v0.21.5
+  Downloaded hyper-rustls v0.27.9
+  Downloaded gloo-worker v0.2.1
+  Downloaded gloo-net v0.3.1
+  Downloaded gloo-history v0.2.2
+  Downloaded minijinja v2.19.0
+  Downloaded tokenizers v0.22.2
+  Downloaded gemm v0.18.2
+  Downloaded yew v0.20.0
+  Downloaded lexical-core v1.0.6
+  Downloaded gloo-worker v0.1.2
+  Downloaded gloo-net v0.5.0
+  Downloaded gemm-common v0.19.0
+  Downloaded gemm v0.19.0
+  Downloaded ureq v2.12.1
+  Downloaded gloo-worker v0.5.0
+  Downloaded rustls v0.23.39
+  Downloaded nalgebra v0.34.2
+  Downloaded libloading v0.9.0
+  Downloaded lexical-parse-integer v1.0.6
+  Downloaded hound v3.5.1
+  Downloaded hf-hub v0.4.3
+  Downloaded gemm-common v0.18.2
+  Downloaded spm_precompiled v0.1.4
+  Downloaded dyn-stack v0.13.2
+  Downloaded anymap2 v0.13.0
+  Downloaded float8 v0.7.0
+  Downloaded flatbuffers v25.12.19
+  Downloaded dary_heap v0.3.9
+  Downloaded criterion-plot v0.8.2
+  Downloaded web-sys v0.3.70
+  Downloaded lz4_flex v0.12.1
+  Downloaded onig_sys v69.9.1
+  Downloaded lexical-write-integer v1.0.6
+  Downloaded arrow-ord v57.3.0
+  Downloaded arrow-data v57.3.0
+  Downloaded pyo3-macros-backend v0.27.2
+  Downloaded gloo-utils v0.2.0
+  Downloaded parquet v57.3.0
+  Downloaded rustls-webpki v0.103.13
+  Downloaded cudaforge v0.1.5
+  Downloaded gemm-c32 v0.19.0
+  Downloaded pyo3 v0.27.2
+  Downloaded arrow-schema v57.3.0
+  Downloaded fancy-regex v0.14.0
+  Downloaded arrow-select v57.3.0
+  Downloaded fancy-regex v0.17.0
+  Downloaded lexical-write-float v1.0.6
+  Downloaded http v0.2.12
+  Downloaded arrow-cast v57.3.0
+  Downloaded lexical-util v1.0.7
+  Downloaded arrow-ipc v57.3.0
+  Downloaded arrow-buffer v57.3.0
+  Downloaded glam v0.14.0
+  Downloaded criterion v0.8.2
+  Downloaded imageproc v0.26.1
+  Downloaded glam v0.16.0
+  Downloaded glam v0.15.2
+  Downloaded glam v0.18.0
+  Downloaded glam v0.17.3
+  Downloaded glam v0.19.0
+  Downloaded glam v0.20.5
+  Downloaded lexical-parse-float v1.0.6
+  Downloaded esaxx-rs v0.1.10
+  Downloaded glam v0.23.0
+  Downloaded glam v0.22.0
+  Downloaded arrow-array v57.3.0
+  Downloaded glam v0.21.3
+  Downloaded glam v0.24.2
+  Downloaded gloo v0.8.1
+  Downloaded glam v0.25.0
+  Downloaded gloo v0.11.0
+  Downloaded glam v0.27.0
+  Downloaded glam v0.28.0
+  Downloaded console_error_panic_hook v0.1.7
+  Downloaded cudarc v0.17.8
+  Downloaded cudarc v0.19.4
+  Downloaded glam v0.30.10
+  Downloaded glam v0.31.1
+  Downloaded libc v0.2.186
+  Downloaded glam v0.32.1
+  Downloaded csv v1.4.0
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling cfg-if v1.0.4
+   Compiling windows-link v0.2.1
+   Compiling autocfg v1.5.0
+   Compiling getrandom v0.3.4
+   Compiling libm v0.2.16
+   Compiling version_check v0.9.5
+   Compiling crossbeam-utils v0.8.21
+   Compiling once_cell v1.21.4
+   Compiling memchr v2.8.0
+   Compiling find-msvc-tools v0.1.9
+   Compiling shlex v1.3.0
+   Compiling windows-sys v0.61.2
+   Compiling zmij v1.0.21
+   Compiling rayon-core v1.13.0
+   Compiling zerocopy v0.8.48
+   Compiling libc v0.2.186
+   Compiling serde_core v1.0.228
+   Compiling num-traits v0.2.19
+   Compiling itoa v1.0.18
+   Compiling winapi-x86_64-pc-windows-gnu v0.4.0
+   Compiling icu_normalizer_data v2.2.0
+   Compiling icu_properties_data v2.2.0
+   Compiling bitflags v2.11.1
+   Compiling stable_deref_trait v1.2.1
+   Compiling crc32fast v1.5.0
+   Compiling pin-project-lite v0.2.17
+   Compiling fnv v1.0.7
+   Compiling paste v1.0.15
+   Compiling jobserver v0.1.34
+   Compiling rand_core v0.9.5
+   Compiling futures-core v0.3.32
+   Compiling serde v1.0.228
+   Compiling smallvec v1.15.1
+   Compiling cc v1.2.60
+   Compiling bytes v1.11.1
+   Compiling thiserror v2.0.18
+   Compiling windows_x86_64_gnu v0.52.6
+   Compiling httparse v1.10.1
+   Compiling native-tls v0.2.18
+   Compiling syn v2.0.117
+   Compiling generic-array v0.14.7
+   Compiling futures-sink v0.3.32
+   Compiling winapi v0.3.9
+   Compiling either v1.15.0
+   Compiling crossbeam-epoch v0.9.18
+   Compiling typenum v1.20.0
+   Compiling serde_json v1.0.149
+   Compiling crossbeam-deque v0.8.6
+   Compiling equivalent v1.0.2
+   Compiling anyhow v1.0.102
+   Compiling slab v0.4.12
+   Compiling futures-channel v0.3.32
+   Compiling pulp v0.22.2
+   Compiling windows_x86_64_gnu v0.53.1
+   Compiling litemap v0.8.2
+   Compiling writeable v0.6.3
+   Compiling ring v0.17.14
+   Compiling http v1.4.0
+   Compiling raw-cpuid v11.6.0
+   Compiling rayon v1.12.0
+   Compiling tracing-core v0.1.36
+   Compiling dyn-stack-macros v0.1.3
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling utf8_iter v1.0.4
+   Compiling futures-task v0.3.32
+   Compiling futures-io v0.3.32
+   Compiling hashbrown v0.17.0
+   Compiling pulp-wasm-simd-flag v0.1.0
+   Compiling log v0.4.29
+   Compiling reborrow v0.5.5
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling rustls v0.23.39
+   Compiling percent-encoding v2.3.2
+   Compiling ident_case v1.0.1
+   Compiling env_home v0.1.0
+   Compiling zeroize v1.8.2
+   Compiling portable-atomic v1.13.1
+   Compiling indexmap v2.14.0
+   Compiling strsim v0.11.1
+   Compiling winsafe v0.0.19
+   Compiling num_cpus v1.17.0
+   Compiling seq-macro v0.3.6
+   Compiling rustls-pki-types v1.14.0
+   Compiling sha2 v0.10.9
+   Compiling http-body v1.0.1
+   Compiling fs2 v0.4.3
+   Compiling glob v0.3.3
+   Compiling ryu v1.0.23
+   Compiling tracing v0.1.44
+   Compiling synstructure v0.13.2
+   Compiling darling_core v0.20.11
+   Compiling mio v1.2.0
+   Compiling socket2 v0.6.3
+   Compiling winapi-util v0.1.11
+   Compiling same-file v1.0.6
+   Compiling walkdir v2.5.0
+   Compiling schannel v0.1.29
+   Compiling aho-corasick v1.1.4
+   Compiling simd-adler32 v0.3.9
+   Compiling tower-service v0.3.3
+   Compiling regex-syntax v0.8.10
+   Compiling try-lock v0.2.5
+   Compiling atomic-waker v1.1.2
+   Compiling pkg-config v0.3.33
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling displaydoc v0.2.5
+   Compiling serde_derive v1.0.228
+   Compiling tokio-macros v2.7.0
+   Compiling bytemuck_derive v1.10.2
+   Compiling zerocopy-derive v0.8.48
+   Compiling futures-macro v0.3.32
+   Compiling thiserror-impl v2.0.18
+   Compiling which v7.0.3
+   Compiling tokio v1.52.1
+   Compiling darling_macro v0.20.11
+   Compiling tracing-attributes v0.1.31
+   Compiling rustversion v1.0.22
+   Compiling zerofrom v0.1.7
+   Compiling futures-util v0.3.32
+   Compiling bytemuck v1.25.0
+   Compiling yoke v0.8.2
+   Compiling zerovec v0.11.6
+   Compiling num-complex v0.4.6
+   Compiling zerotrie v0.2.4
+   Compiling dyn-stack v0.13.2
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling icu_collections v2.2.0
+   Compiling icu_locale_core v2.2.0
+   Compiling regex-automata v0.4.14
+   Compiling darling v0.20.11
+   Compiling onig_sys v69.9.1
+   Compiling cudaforge v0.1.5
+   Compiling icu_provider v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling want v0.3.1
+   Compiling form_urlencoded v1.2.2
+   Compiling getrandom v0.2.17
+   Compiling windows-strings v0.5.1
+   Compiling windows-result v0.4.1
+   Compiling adler2 v2.0.1
+   Compiling bit-vec v0.8.0
+   Compiling base64 v0.22.1
+   Compiling untrusted v0.9.0
+   Compiling windows-registry v0.6.1
+   Compiling bit-set v0.8.0
+   Compiling miniz_oxide v0.8.9
+   Compiling windows-targets v0.52.6
+   Compiling idna_adapter v1.2.1
+   Compiling tokio-util v0.7.18
+   Compiling idna v1.1.0
+   Compiling derive_builder_core v0.20.2
+   Compiling ppv-lite86 v0.2.21
+   Compiling h2 v0.4.13
+   Compiling itertools v0.14.0
+   Compiling rand_chacha v0.9.0
+   Compiling rand v0.9.4
+   Compiling sync_wrapper v1.0.2
+   Compiling ahash v0.8.12
+   Compiling byteorder v1.5.0
+   Compiling ipnet v2.12.0
+   Compiling esaxx-rs v0.1.10
+   Compiling tower-layer v0.3.3
+   Compiling minimal-lexical v0.2.1
+   Compiling rand_distr v0.5.1
+   Compiling zlib-rs v0.6.3
+   Compiling tower v0.5.3
+   Compiling nom v7.1.3
+   Compiling half v2.7.1
+   Compiling rustls-webpki v0.103.13
+   Compiling castaway v0.2.4
+   Compiling hyper v1.9.0
+   Compiling gemm-common v0.19.0
+   Compiling derive_builder_macro v0.20.2
+   Compiling url v2.5.8
+   Compiling tokio-native-tls v0.3.1
+   Compiling windows-sys v0.59.0
+   Compiling monostate-impl v0.1.18
+   Compiling http-body-util v0.1.3
+   Compiling gemm-f32 v0.19.0
+   Compiling hyper-util v0.1.20
+   Compiling flate2 v1.1.9
+   Compiling webpki-roots v1.0.7
+   Compiling num-integer v0.1.46
+   Compiling unicode-segmentation v1.13.2
+   Compiling subtle v2.6.1
+   Compiling encode_unicode v1.0.0
+   Compiling base64 v0.13.1
+   Compiling macro_rules_attribute-proc_macro v0.2.2
+   Compiling static_assertions v1.1.0
+   Compiling option-ext v0.2.0
+   Compiling allocator-api2 v0.2.21
+   Compiling cudarc v0.19.4
+   Compiling iri-string v0.7.12
+   Compiling unicode-width v0.2.2
+   Compiling foldhash v0.2.0
+   Compiling console v0.15.11
+   Compiling macro_rules_attribute v0.2.2
+   Compiling hashbrown v0.16.1
+   Compiling serde_urlencoded v0.7.1
+   Compiling hyper-tls v0.6.0
+   Compiling compact_str v0.9.0
+   Compiling dirs-sys v0.5.0
+   Compiling spm_precompiled v0.1.4
+   Compiling socks v0.3.4
+   Compiling gemm-f16 v0.19.0
+   Compiling webpki-roots v0.26.11
+   Compiling monostate v0.1.18
+   Compiling derive_builder v0.20.2
+   Compiling gemm-c64 v0.19.0
+   Compiling gemm-c32 v0.19.0
+   Compiling gemm-f64 v0.19.0
+   Compiling windows-targets v0.53.5
+   Compiling float8 v0.7.0
+   Compiling tower-http v0.6.8
+   Compiling rayon-cond v0.4.0
+   Compiling fancy-regex v0.14.0
+   Compiling regex v1.12.3
+   Compiling futures-executor v0.3.32
+   Compiling dary_heap v0.3.9
+   Compiling unicode-normalization-alignments v0.1.12
+   Compiling encoding_rs v0.8.35
+   Compiling libloading v0.9.0
+   Compiling typed-path v0.12.3
+   Compiling mime v0.3.17
+   Compiling unicode_categories v0.1.1
+   Compiling number_prefix v0.4.0
+   Compiling indicatif v0.17.11
+   Compiling reqwest v0.12.28
+   Compiling futures v0.3.32
+   Compiling gemm v0.19.0
+   Compiling ureq v2.12.1
+   Compiling zip v7.2.0
+   Compiling windows-sys v0.60.2
+   Compiling safetensors v0.7.0
+   Compiling dirs v6.0.0
+   Compiling num-bigint v0.4.6
+   Compiling safe_arch v0.7.4
+   Compiling fdeflate v0.3.7
+   Compiling onig v6.5.1
+   Compiling memmap2 v0.9.10
+   Compiling matrixmultiply v0.3.10
+   Compiling anstyle v1.0.14
+   Compiling zune-core v0.5.1
+   Compiling pxfm v0.1.29
+   Compiling utf8parse v0.2.2
+   Compiling once_cell_polyfill v1.70.2
+   Compiling anstyle-wincon v3.0.11
+   Compiling zune-jpeg v0.5.15
+   Compiling tokenizers v0.22.2
+   Compiling wide v0.7.33
+   Compiling anstyle-parse v1.0.0
+   Compiling png v0.18.1
+   Compiling num-rational v0.4.2
+   Compiling hf-hub v0.4.3
+   Compiling anstyle-query v1.1.5
+   Compiling approx v0.5.1
+   Compiling lazy_static v1.5.0
+   Compiling rawpointer v0.2.1
+   Compiling ttf-parser v0.25.1
+   Compiling byteorder-lite v0.1.0
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstream v1.0.0
+   Compiling sharded-slab v0.1.7
+   Compiling simba v0.9.1
+   Compiling num-iter v0.1.45
+   Compiling fancy-regex v0.17.0
+   Compiling serde_plain v1.0.2
+   Compiling nu-ansi-term v0.50.3
+   Compiling tracing-log v0.2.0
+   Compiling csv-core v0.1.13
+   Compiling thread_local v1.1.9
+   Compiling heck v0.5.0
+   Compiling memo-map v0.3.3
+   Compiling clap_lex v1.1.0
+   Compiling ab_glyph_rasterizer v0.1.10
+   Compiling clap_derive v4.6.1
+   Compiling clap_builder v4.6.0
+   Compiling minijinja v2.19.0
+   Compiling moxcms v0.8.1
+   Compiling owned_ttf_parser v0.25.1
+   Compiling ab_glyph v0.2.32
+   Compiling tracing-subscriber v0.3.23
+   Compiling csv v1.4.0
+   Compiling nalgebra v0.34.2
+   Compiling num v0.4.3
+   Compiling chrono v0.4.44
+   Compiling tracing-chrome v0.7.2
+   Compiling clap v4.6.1
+   Compiling image v0.25.10
+   Compiling candle-kernels v0.10.2 (J:\candle-src\candle-kernels)
+   Compiling candle-examples v0.10.2 (J:\candle-src\candle-examples)
+error: failed to run custom build command for `candle-kernels v0.10.2 (J:\candle-src\candle-kernels)`
+
+Caused by:
+  process didn't exit successfully: `J:\candle-src\target\release\build\candle-kernels-f9054779c3830997\build-script-build` (exit code: 1)
+  --- stdout
+  cargo::rerun-if-changed=build.rs
+  cargo::rerun-if-changed=src/compatibility.cuh
+  cargo::rerun-if-changed=src/cuda_utils.cuh
+  cargo::rerun-if-changed=src/binary_op_macros.cuh
+  cargo:rustc-env=CUDA_INCLUDE_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include
+  cargo:rerun-if-changed=src\affine.cu
+  cargo:rerun-if-changed=src\binary.cu
+  cargo:rerun-if-changed=src\cast.cu
+  cargo:rerun-if-changed=src\conv.cu
+  cargo:rerun-if-changed=src\fill.cu
+  cargo:rerun-if-changed=src\indexing.cu
+  cargo:rerun-if-changed=src\quantized.cu
+  cargo:rerun-if-changed=src\reduce.cu
+  cargo:rerun-if-changed=src\sort.cu
+  cargo:rerun-if-changed=src\ternary.cu
+  cargo:rerun-if-changed=src\unary.cu
+  cargo:rerun-if-env-changed=CUDA_COMPUTE_CAP
+  cargo:rerun-if-env-changed=NVCC_CCBIN
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+  nvcc fatal   : Cannot find compiler 'cl.exe' in PATH
+
+  --- stderr
+  Error: CompilationFailed { path: "src\\affine.cu", message: "nvcc error:\n\n" }
+warning: build failed, waiting for other jobs to finish...

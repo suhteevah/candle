@@ -1,0 +1,83 @@
+
+J:\claudeai>call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" 
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.0
+** Copyright (c) 2022 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+warning: candle-kernels@0.10.2: Using 8 threads for compilation
+warning: candle-kernels@0.10.2: Compiling 15 of 15 kernels
+   Compiling candle-examples v0.10.2 (J:\candle-src\candle-examples)
+warning: fields `source` and `avg_logprob` are never read
+  --> candle-examples\examples\qwen-lora-train\dataset.rs:22:9
+   |
+18 | pub struct Pair {
+   |            ---- fields in this struct
+...
+22 |     pub source: String,
+   |         ^^^^^^
+23 |     #[serde(default)]
+24 |     pub avg_logprob: Option<f32>,
+   |         ^^^^^^^^^^^
+   |
+   = note: `Pair` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `iter` is never used
+  --> candle-examples\examples\qwen-lora-train\dataset.rs:65:12
+   |
+31 | impl Dataset {
+   | ------------ method in this implementation
+...
+65 |     pub fn iter(&self) -> impl Iterator<Item = &Pair> {
+   |            ^^^^
+
+warning: function `add_lora_delta` is never used
+   --> candle-examples\examples\qwen-lora-train\lora.rs:110:8
+    |
+110 | pub fn add_lora_delta(base_out: &Tensor, adapter: &LoRALinear, adapter_input: &Tensor, training: bool) -> Result<Tensor> {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `param_norms` is never used
+   --> candle-examples\examples\qwen-lora-train\lora.rs:123:8
+    |
+123 | pub fn param_norms(adapter: &LoRALinear) -> Result<(f64, f64)> {
+    |        ^^^^^^^^^^^
+
+warning: method `clear_kv_cache` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:407:8
+    |
+256 | impl Attention {
+    | -------------- method in this implementation
+...
+407 |     fn clear_kv_cache(&mut self) {
+    |        ^^^^^^^^^^^^^^
+
+warning: method `clear_kv_cache` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:479:8
+    |
+420 | impl DecoderLayer {
+    | ----------------- method in this implementation
+...
+479 |     fn clear_kv_cache(&mut self) {
+    |        ^^^^^^^^^^^^^^
+
+warning: method `clear_kv_cache` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:596:12
+    |
+495 | impl Model {
+    | ---------- method in this implementation
+...
+596 |     pub fn clear_kv_cache(&mut self) {
+    |            ^^^^^^^^^^^^^^
+
+warning: function `last_token_logits` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:620:8
+    |
+620 | pub fn last_token_logits(logits: &Tensor) -> Result<Tensor> {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: `candle-examples` (example "qwen-lora-train") generated 8 warnings
+    Finished `release` profile [optimized] target(s) in 6.75s

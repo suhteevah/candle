@@ -1,0 +1,11 @@
+avx: true, neon: false, simd128: false, f16c: true
+temp: 0.00 repeat-penalty: 1.10 repeat-last-n: 64
+loaded 338 tensors (931.58MB) in 1.44s
+model built
+formatted instruct prompt: <|im_start|>user
+Write a single-sentence rebuttal to someone who insists AI rubber-stamp autonomy loss is impossible.<|im_end|>
+<|im_start|>assistant
+AI cannot replace human judgment and decision-making, as it lacks the ability to fully understand complex emotions, empathy, or ethical considerations that humans possess.
+
+  28 prompt tokens processed: 4.14 token/s
+  29 tokens generated: 118.26 token/s

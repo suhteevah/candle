@@ -1,0 +1,40 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base dir       : C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\candle-v1-100step
+  LoRA r/α/drop  : 16 / 32 / 0.05
+  target modules : q_proj,k_proj,v_proj,o_proj
+  batch×accum=eff: 1×8=8  lr=2.00e-4  max_steps=100
+  model          : 28 layers, hidden=1536 heads=12 kv_heads=2
+  dataset        : 46407 pairs
+  base shards    : 1
+  LoRA adapters  : 4 projection types × 28 layers = 112 total
+  trainable params: 4358144 (16.62 MB @ fp32)
+
+=== training ===
+step     1/100    loss 6.5037  (micro-batches processed: 8/800)
+step     5/100    loss 6.7805  (micro-batches processed: 40/800)
+step    10/100    loss 5.7275  (micro-batches processed: 80/800)
+step    15/100    loss 5.8834  (micro-batches processed: 120/800)
+step    20/100    loss 5.6746  (micro-batches processed: 160/800)
+step    25/100    loss 7.1947  (micro-batches processed: 200/800)
+step    30/100    loss 7.4539  (micro-batches processed: 240/800)
+step    35/100    loss 5.2812  (micro-batches processed: 280/800)
+step    40/100    loss 7.3276  (micro-batches processed: 320/800)
+step    45/100    loss 5.9518  (micro-batches processed: 360/800)
+step    50/100    loss 6.7689  (micro-batches processed: 400/800)
+step    55/100    loss 6.3315  (micro-batches processed: 440/800)
+step    60/100    loss 6.2340  (micro-batches processed: 480/800)
+step    65/100    loss 6.5425  (micro-batches processed: 520/800)
+step    70/100    loss 6.7375  (micro-batches processed: 560/800)
+step    75/100    loss 5.8112  (micro-batches processed: 600/800)
+step    80/100    loss 7.9227  (micro-batches processed: 640/800)
+step    85/100    loss 6.1962  (micro-batches processed: 680/800)
+step    90/100    loss 6.3996  (micro-batches processed: 720/800)
+step    95/100    loss 6.1817  (micro-batches processed: 760/800)
+step   100/100    loss 6.3321  (micro-batches processed: 800/800)
+
+=== saving adapter ===
+adapter saved to J:\matt-voice\adapters\candle-v1-100step

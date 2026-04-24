@@ -1,0 +1,24 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base dir       : C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\candle-regression-small
+  LoRA r/α/drop  : 8 / 16 / 0.05
+  target modules : q_proj,v_proj
+  batch×accum=eff: 1×4=4  lr=2.00e-4  max_steps=5
+  model          : 28 layers, hidden=1536 heads=12 kv_heads=2
+  dataset        : 46407 pairs
+  base shards    : 1
+  LoRA adapters  : 2 projection types × 28 layers = 56 total
+  trainable params: 1089536 (4.16 MB @ fp32)
+
+=== training ===
+step     1/5      loss 5.7110  (micro-batches processed: 4/20)
+step     2/5      loss 6.7870  (micro-batches processed: 8/20)
+step     3/5      loss 5.0927  (micro-batches processed: 12/20)
+step     4/5      loss 6.3311  (micro-batches processed: 16/20)
+step     5/5      loss 5.4511  (micro-batches processed: 20/20)
+
+=== saving adapter ===
+adapter saved to J:\matt-voice\adapters\candle-regression-small

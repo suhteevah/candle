@@ -1,0 +1,30 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base dir       : C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\candle-v1-bf16adapters
+  LoRA r/α/drop  : 16 / 32 / 0.05
+  target modules : q_proj,k_proj,v_proj,o_proj
+  batch×accum=eff: 1×8=8  lr=2.00e-4  max_steps=50
+  model          : 28 layers, hidden=1536 heads=12 kv_heads=2
+  dataset        : 46407 pairs
+  base shards    : 1
+  LoRA adapters  : 4 projection types × 28 layers = 112 total
+  trainable params: 4358144 (16.62 MB @ fp32)
+
+=== training ===
+step     1/50     loss 6.5037  (micro-batches processed: 8/400)
+step     5/50     loss 6.7805  (micro-batches processed: 40/400)
+step    10/50     loss 5.7275  (micro-batches processed: 80/400)
+step    15/50     loss 5.8834  (micro-batches processed: 120/400)
+step    20/50     loss 5.6746  (micro-batches processed: 160/400)
+step    25/50     loss 7.1947  (micro-batches processed: 200/400)
+step    30/50     loss 7.4539  (micro-batches processed: 240/400)
+step    35/50     loss 5.2812  (micro-batches processed: 280/400)
+step    40/50     loss 7.3276  (micro-batches processed: 320/400)
+step    45/50     loss 5.9518  (micro-batches processed: 360/400)
+step    50/50     loss 6.7689  (micro-batches processed: 400/400)
+
+=== saving adapter ===
+adapter saved to J:\matt-voice\adapters\candle-v1-bf16adapters

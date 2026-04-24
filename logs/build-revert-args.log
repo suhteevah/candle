@@ -1,0 +1,222 @@
+
+J:\claudeai>call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" 
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.0
+** Copyright (c) 2022 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+warning: candle-kernels@0.10.2: Using 8 threads for compilation
+warning: candle-kernels@0.10.2: Compiling 15 of 15 kernels
+   Compiling candle-examples v0.10.2 (J:\candle-src\candle-examples)
+warning: unused import: `Module`
+  --> candle-examples\examples\qwen-lora-train\xentropy.rs:39:21
+   |
+39 | use candle::{DType, Module, Result, Tensor, D};
+   |                     ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `masked_cross_entropy` is never used
+   --> candle-examples\examples\qwen-lora-train\main.rs:607:4
+    |
+607 | fn masked_cross_entropy(logits: &Tensor, target: &Tensor, mask: &Tensor) -> candle::Result<Tensor> {
+    |    ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `source` and `avg_logprob` are never read
+  --> candle-examples\examples\qwen-lora-train\dataset.rs:22:9
+   |
+18 | pub struct Pair {
+   |            ---- fields in this struct
+...
+22 |     pub source: String,
+   |         ^^^^^^
+23 |     #[serde(default)]
+24 |     pub avg_logprob: Option<f32>,
+   |         ^^^^^^^^^^^
+   |
+   = note: `Pair` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `iter` is never used
+  --> candle-examples\examples\qwen-lora-train\dataset.rs:65:12
+   |
+31 | impl Dataset {
+   | ------------ method in this implementation
+...
+65 |     pub fn iter(&self) -> impl Iterator<Item = &Pair> {
+   |            ^^^^
+
+warning: function `add_lora_delta` is never used
+   --> candle-examples\examples\qwen-lora-train\lora.rs:110:8
+    |
+110 | pub fn add_lora_delta(base_out: &Tensor, adapter: &LoRALinear, adapter_input: &Tensor, training: bool) -> Result<Tensor> {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `param_norms` is never used
+   --> candle-examples\examples\qwen-lora-train\lora.rs:123:8
+    |
+123 | pub fn param_norms(adapter: &LoRALinear) -> Result<(f64, f64)> {
+    |        ^^^^^^^^^^^
+
+warning: method `clear_kv_cache` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:431:8
+    |
+278 | impl Attention {
+    | -------------- method in this implementation
+...
+431 |     fn clear_kv_cache(&mut self) {
+    |        ^^^^^^^^^^^^^^
+
+warning: method `clear_kv_cache` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:503:8
+    |
+444 | impl DecoderLayer {
+    | ----------------- method in this implementation
+...
+503 |     fn clear_kv_cache(&mut self) {
+    |        ^^^^^^^^^^^^^^
+
+warning: method `clear_kv_cache` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:692:12
+    |
+519 | impl Model {
+    | ---------- method in this implementation
+...
+692 |     pub fn clear_kv_cache(&mut self) {
+    |            ^^^^^^^^^^^^^^
+
+warning: function `last_token_logits` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:716:8
+    |
+716 | pub fn last_token_logits(logits: &Tensor) -> Result<Tensor> {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: struct `QLoRAProjection` is never constructed
+  --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:34:8
+   |
+34 | struct QLoRAProjection {
+   |        ^^^^^^^^^^^^^^^
+
+warning: associated items `new` and `forward` are never used
+  --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:42:8
+   |
+41 | impl QLoRAProjection {
+   | -------------------- associated items in this implementation
+42 |     fn new(
+   |        ^^^
+...
+64 |     fn forward(&self, xs: &Tensor, training: bool) -> Result<Tensor> {
+   |        ^^^^^^^
+
+warning: struct `QLoRAMlp` is never constructed
+  --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:77:8
+   |
+77 | struct QLoRAMlp {
+   |        ^^^^^^^^
+
+warning: method `forward` is never used
+  --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:84:8
+   |
+83 | impl QLoRAMlp {
+   | ------------- method in this implementation
+84 |     fn forward(&self, xs: &Tensor, training: bool) -> Result<Tensor> {
+   |        ^^^^^^^
+
+warning: struct `DiffRmsNorm` is never constructed
+  --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:92:8
+   |
+92 | struct DiffRmsNorm {
+   |        ^^^^^^^^^^^
+
+warning: associated items `from_qtensor` and `forward` are never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:98:8
+    |
+ 97 | impl DiffRmsNorm {
+    | ---------------- associated items in this implementation
+ 98 |     fn from_qtensor(qt: std::sync::Arc<candle::quantized::QTensor>, eps: f32) -> Result<Self> {
+    |        ^^^^^^^^^^^^
+...
+102 |     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
+    |        ^^^^^^^
+
+warning: struct `QLoRAAttention` is never constructed
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:107:8
+    |
+107 | struct QLoRAAttention {
+    |        ^^^^^^^^^^^^^^
+
+warning: methods `forward` and `clear_kv_cache` are never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:123:8
+    |
+122 | impl QLoRAAttention {
+    | ------------------- methods in this implementation
+123 |     fn forward(
+    |        ^^^^^^^
+...
+202 |     fn clear_kv_cache(&mut self) {
+    |        ^^^^^^^^^^^^^^
+
+warning: struct `DecoderLayer` is never constructed
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:207:8
+    |
+207 | struct DecoderLayer {
+    |        ^^^^^^^^^^^^
+
+warning: methods `forward` and `clear_kv_cache` are never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:215:8
+    |
+214 | impl DecoderLayer {
+    | ----------------- methods in this implementation
+215 |     fn forward(
+    |        ^^^^^^^
+...
+232 |     fn clear_kv_cache(&mut self) {
+    |        ^^^^^^^^^^^^^^
+
+warning: struct `Model` is never constructed
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:237:12
+    |
+237 | pub struct Model {
+    |            ^^^^^
+
+warning: function `precomput_freqs_cis` is never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:247:4
+    |
+247 | fn precomput_freqs_cis(
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: multiple associated items are never used
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:268:12
+    |
+265 | impl Model {
+    | ---------- associated items in this implementation
+...
+268 |     pub fn from_gguf<R: std::io::Seek + std::io::Read>(
+    |            ^^^^^^^^^
+...
+447 |     fn mask(&mut self, seq_len: usize, index_pos: usize) -> Result<Tensor> {
+    |        ^^^^
+...
+461 |     pub fn forward(&mut self, x: &Tensor, index_pos: usize) -> Result<Tensor> {
+    |            ^^^^^^^
+...
+478 |     pub fn forward_train(&mut self, input_ids: &Tensor) -> Result<Tensor> {
+    |            ^^^^^^^^^^^^^
+...
+494 |     pub fn forward_train_with_checkpoint(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+522 |     pub fn backward_through_checkpoints(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+536 |     pub fn output_matmul(&self) -> &QMatMul {
+    |            ^^^^^^^^^^^^^
+...
+540 |     pub fn clear_kv_cache(&mut self) {
+    |            ^^^^^^^^^^^^^^
+
+warning: `candle-examples` (example "qwen-lora-train") generated 23 warnings (run `cargo fix --example "qwen-lora-train" -p candle-examples` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 7.07s

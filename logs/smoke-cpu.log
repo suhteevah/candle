@@ -1,0 +1,11 @@
+avx: true, neon: false, simd128: false, f16c: true
+temp: 0.00 repeat-penalty: 1.10 repeat-last-n: 64
+loaded 290 tensors (347.02MB) in 1.24s
+model built
+formatted instruct prompt: <|im_start|>user
+In one sentence, why does Rust prevent data races?<|im_end|>
+<|im_start|>assistant
+In Rust, data races are prevented by using `std::sync::Arc` and `std::atomic::AtomicUsize`.
+
+  19 prompt tokens processed: 88.78 token/s
+  26 tokens generated: 43.96 token/s

@@ -1,0 +1,20 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base dir       : C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\candle-speed1
+  LoRA r/α/drop  : 16 / 32 / 0.05
+  target modules : q_proj,k_proj,v_proj,o_proj
+  batch×accum=eff: 1×4=4  lr=2.00e-4  max_steps=10
+  model          : 28 layers, hidden=1536 heads=12 kv_heads=2
+  dataset        : 46407 pairs
+  base shards    : 1
+  LoRA adapters  : 4 projection types × 28 layers = 112 total
+  trainable params: 4358144 (16.62 MB @ fp32)
+  prefetch       : on (queue=8)
+  ce chunk size  : 32
+
+=== training ===
+step     1/10     loss 5.7387  (micro-batches processed: 4/40)
+step     2/10     loss 6.7385  (micro-batches processed: 8/40)

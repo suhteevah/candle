@@ -1,0 +1,73 @@
+
+J:\claudeai>call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" 
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.0
+** Copyright (c) 2022 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+warning: candle-kernels@0.10.2: Using 8 threads for compilation
+warning: candle-kernels@0.10.2: Compiling 15 of 15 kernels
+   Compiling candle-core v0.10.2 (J:\candle-src\candle-core)
+   Compiling candle-nn v0.10.2 (J:\candle-src\candle-nn)
+   Compiling candle-transformers v0.10.2 (J:\candle-src\candle-transformers)
+   Compiling candle-examples v0.10.2 (J:\candle-src\candle-examples)
+error[E0277]: `?` couldn't convert the error to `candle_core::Error`
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:644:64
+    |
+644 |             current = ctx.record_boundary(input_for_layer, out)?;
+    |                           -------------------------------------^ the trait `From<anyhow::Error>` is not implemented for `candle_core::Error`
+    |                           |
+    |                           this can't be annotated with `?` because it has type `Result<_, anyhow::Error>`
+    |
+    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+    = help: the following other types implement trait `From<T>`:
+              `candle_core::Error` implements `From<CudaError>`
+              `candle_core::Error` implements `From<FromUtf8Error>`
+              `candle_core::Error` implements `From<MetalError>`
+              `candle_core::Error` implements `From<ParseIntError>`
+              `candle_core::Error` implements `From<candle_core::pickle::Object>`
+              `candle_core::Error` implements `From<safetensors::tensor::SafeTensorError>`
+              `candle_core::Error` implements `From<std::io::Error>`
+              `candle_core::Error` implements `From<std::num::TryFromIntError>`
+              `candle_core::Error` implements `From<zip::result::ZipError>`
+
+error[E0308]: mismatched types
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:662:9
+    |
+660 |       ) -> Result<()> {
+    |            ---------- expected `Result<(), candle_core::Error>` because of return type
+661 |           let layers = &mut self.layers;
+662 | /         ctx.backward_through_segments(grads, |i, saved_input, upstream, grads| {
+...   |
+670 | |             Ok(())
+671 | |         })
+    | |__________^ expected `candle_core::Error`, found `anyhow::Error`
+    |
+    = note: `anyhow::Error` and `candle_core::Error` have similar names, but are actually distinct types
+note: `anyhow::Error` is defined in crate `anyhow`
+   --> C:\Users\Matt\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\anyhow-1.0.102\src\lib.rs:390:1
+    |
+390 | pub struct Error {
+    | ^^^^^^^^^^^^^^^^
+note: `candle_core::Error` is defined in crate `candle_core`
+   --> J:\candle-src\candle-core\src\error.rs:22:1
+    |
+ 22 | pub enum Error {
+    | ^^^^^^^^^^^^^^
+
+error[E0624]: associated function `new` is private
+   --> candle-examples\examples\qwen-lora-train\main.rs:297:62
+    |
+297 |                 let mut grads = candle::backprop::GradStore::new();
+    |                                                              ^^^ private associated function
+    |
+   ::: J:\candle-src\candle-core\src\backprop.rs:762:5
+    |
+762 |     fn new() -> Self {
+    |     ---------------- private associated function defined here
+
+Some errors have detailed explanations: E0277, E0308, E0624.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `candle-examples` (example "qwen-lora-train") due to 3 previous errors

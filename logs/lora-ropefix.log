@@ -1,0 +1,23 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base dir       : C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\candle-v1-ropefix
+  LoRA r/α/drop  : 8 / 16 / 0.05
+  target modules : q_proj
+  batch×accum=eff: 1×1=1  lr=2.00e-4  max_steps=3
+  model          : 28 layers, hidden=1536 heads=12 kv_heads=2
+  dataset        : 46407 pairs
+  base shards    : 1
+  LoRA adapters  : 1 projection types × 28 layers = 28 total
+  trainable params: 688128 (2.62 MB @ fp32)
+
+=== training ===
+DIAG: grad store contains 0/56 trainable Vars; sample grad L2 norm: None
+step     1/3      loss 6.2557  (micro-batches processed: 1/3)
+step     2/3      loss 5.9542  (micro-batches processed: 2/3)
+step     3/3      loss 2.3354  (micro-batches processed: 3/3)
+
+=== saving adapter ===
+adapter saved to J:\matt-voice\adapters\candle-v1-ropefix

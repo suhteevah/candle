@@ -1,0 +1,333 @@
+
+J:\claudeai>call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" 
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.0
+** Copyright (c) 2022 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+    Checking cfg-if v1.0.4
+    Checking windows-link v0.2.1
+    Checking once_cell v1.21.4
+    Checking memchr v2.8.0
+    Checking itoa v1.0.18
+   Compiling windows-sys v0.61.2
+    Checking stable_deref_trait v1.2.1
+    Checking libm v0.2.16
+    Checking serde_core v1.0.228
+    Checking bitflags v2.11.1
+    Checking bytemuck v1.25.0
+    Checking zerocopy v0.8.48
+    Checking zerofrom v0.1.7
+    Checking smallvec v1.15.1
+    Checking pin-project-lite v0.2.17
+    Checking crossbeam-utils v0.8.21
+    Checking getrandom v0.3.4
+    Checking either v1.15.0
+    Checking futures-core v0.3.32
+    Checking yoke v0.8.2
+    Checking bytes v1.11.1
+    Checking rand_core v0.9.5
+    Checking futures-sink v0.3.32
+    Checking equivalent v1.0.2
+    Checking libc v0.2.186
+    Checking tracing-core v0.1.36
+    Checking raw-cpuid v11.6.0
+    Checking hashbrown v0.17.0
+    Checking log v0.4.29
+    Checking slab v0.4.12
+    Checking pulp-wasm-simd-flag v0.1.0
+    Checking zerovec v0.11.6
+    Checking reborrow v0.5.5
+    Checking dyn-stack v0.13.2
+    Checking crc32fast v1.5.0
+    Checking crossbeam-epoch v0.9.18
+    Checking zmij v1.0.21
+    Checking futures-channel v0.3.32
+    Checking writeable v0.6.3
+    Checking litemap v0.8.2
+    Checking zerotrie v0.2.4
+    Checking futures-task v0.3.32
+    Checking utf8_iter v1.0.4
+    Checking futures-io v0.3.32
+    Checking ryu v1.0.23
+    Checking crossbeam-deque v0.8.6
+    Checking aho-corasick v1.1.4
+    Checking http v1.4.0
+    Checking simd-adler32 v0.3.9
+    Checking futures-util v0.3.32
+    Checking zeroize v1.8.2
+    Checking indexmap v2.14.0
+    Checking regex-syntax v0.8.10
+    Checking rayon-core v1.13.0
+    Checking percent-encoding v2.3.2
+    Checking tinystr v0.8.3
+    Checking potential_utf v0.1.5
+    Checking rustls-pki-types v1.14.0
+    Checking icu_normalizer_data v2.2.0
+    Checking icu_collections v2.2.0
+    Checking icu_locale_core v2.2.0
+    Checking icu_properties_data v2.2.0
+    Checking num-traits v0.2.19
+    Checking tracing v0.1.44
+    Checking rayon v1.12.0
+    Checking adler2 v2.0.1
+   Compiling winapi v0.3.9
+    Checking bit-vec v0.8.0
+    Checking miniz_oxide v0.8.9
+    Checking itertools v0.14.0
+    Checking http-body v1.0.1
+    Checking bit-set v0.8.0
+    Checking fnv v1.0.7
+    Checking zlib-rs v0.6.3
+    Checking byteorder v1.5.0
+    Checking tower-service v0.3.3
+    Checking num-complex v0.4.6
+    Checking minimal-lexical v0.2.1
+    Checking atomic-waker v1.1.2
+    Checking try-lock v0.2.5
+    Checking num-integer v0.1.46
+    Checking windows_x86_64_msvc v0.52.6
+    Checking nom v7.1.3
+    Checking want v0.3.1
+    Checking httparse v1.10.1
+    Checking icu_provider v2.2.0
+    Checking serde v1.0.228
+    Checking serde_json v1.0.149
+    Checking pulp v0.22.2
+    Checking thiserror v2.0.18
+    Checking castaway v0.2.4
+    Checking icu_properties v2.2.0
+    Checking icu_normalizer v2.2.0
+    Checking onig_sys v69.9.1
+    Checking form_urlencoded v1.2.2
+    Checking windows-strings v0.5.1
+    Checking regex-automata v0.4.14
+    Checking windows-result v0.4.1
+    Checking getrandom v0.2.17
+    Checking flate2 v1.1.9
+    Checking base64 v0.13.1
+    Checking foldhash v0.2.0
+    Checking untrusted v0.9.0
+    Checking unicode-segmentation v1.13.2
+    Checking allocator-api2 v0.2.21
+    Checking base64 v0.22.1
+    Checking static_assertions v1.1.0
+    Checking ring v0.17.14
+    Checking compact_str v0.9.0
+    Checking windows-registry v0.6.1
+    Checking rayon-cond v0.4.0
+    Checking macro_rules_attribute v0.2.2
+    Checking monostate v0.1.18
+    Checking hashbrown v0.16.1
+    Checking dary_heap v0.3.9
+    Checking derive_builder v0.20.2
+    Checking onig v6.5.1
+    Checking windows-targets v0.52.6
+    Checking esaxx-rs v0.1.10
+    Checking sync_wrapper v1.0.2
+    Checking idna_adapter v1.2.1
+    Checking unicode-normalization-alignments v0.1.12
+    Checking spm_precompiled v0.1.4
+    Checking tower-layer v0.3.3
+    Checking ipnet v2.12.0
+    Checking idna v1.1.0
+    Checking unicode_categories v0.1.1
+    Checking typed-path v0.12.3
+    Checking num_cpus v1.17.0
+   Compiling socks v0.3.4
+    Checking windows-sys v0.59.0
+    Checking windows_x86_64_msvc v0.53.1
+    Checking num-bigint v0.4.6
+    Checking http-body-util v0.1.3
+    Checking webpki-roots v1.0.7
+    Checking safetensors v0.7.0
+    Checking url v2.5.8
+    Checking fdeflate v0.3.7
+    Checking safe_arch v0.7.4
+    Checking ppv-lite86 v0.2.21
+    Checking ahash v0.8.12
+    Checking memmap2 v0.9.10
+    Checking anstyle v1.0.14
+    Checking utf8parse v0.2.2
+    Checking pxfm v0.1.29
+    Checking unicode-width v0.2.2
+    Checking once_cell_polyfill v1.70.2
+    Checking rand_chacha v0.9.0
+    Checking iri-string v0.7.12
+    Checking subtle v2.6.1
+    Checking zune-core v0.5.1
+    Checking encode_unicode v1.0.0
+    Checking rustls-webpki v0.103.13
+    Checking rand v0.9.4
+    Checking option-ext v0.2.0
+    Checking zip v7.2.0
+    Checking anstyle-parse v1.0.0
+    Checking zune-jpeg v0.5.15
+    Checking png v0.18.1
+    Checking portable-atomic v1.13.1
+    Checking wide v0.7.33
+    Checking console v0.15.11
+    Checking num-rational v0.4.2
+    Checking rustls v0.23.39
+    Checking rand_distr v0.5.1
+    Checking webpki-roots v0.26.11
+    Checking windows-targets v0.53.5
+    Checking futures-executor v0.3.32
+    Checking serde_urlencoded v0.7.1
+    Checking approx v0.5.1
+    Checking encoding_rs v0.8.35
+    Checking is_terminal_polyfill v1.70.2
+    Checking colorchoice v1.0.5
+    Checking lazy_static v1.5.0
+    Checking number_prefix v0.4.0
+    Checking byteorder-lite v0.1.0
+    Checking mime v0.3.17
+    Checking rawpointer v0.2.1
+    Checking ttf-parser v0.25.1
+    Checking sharded-slab v0.1.7
+    Checking matrixmultiply v0.3.10
+    Checking indicatif v0.17.11
+    Checking half v2.7.1
+    Checking futures v0.3.32
+    Checking windows-sys v0.60.2
+    Checking serde_plain v1.0.2
+    Checking num-iter v0.1.45
+    Checking fancy-regex v0.14.0
+    Checking regex v1.12.3
+    Checking fancy-regex v0.17.0
+    Checking tracing-log v0.2.0
+    Checking csv-core v0.1.13
+    Checking gemm-common v0.19.0
+    Checking float8 v0.7.0
+    Checking thread_local v1.1.9
+    Checking typenum v1.20.0
+    Checking strsim v0.11.1
+    Checking ab_glyph_rasterizer v0.1.10
+    Checking clap_lex v1.1.0
+    Checking memo-map v0.3.3
+    Checking csv v1.4.0
+    Checking tokenizers v0.22.2
+    Checking gemm-f32 v0.19.0
+    Checking gemm-c32 v0.19.0
+    Checking gemm-c64 v0.19.0
+    Checking gemm-f64 v0.19.0
+    Checking simba v0.9.1
+    Checking minijinja v2.19.0
+    Checking num v0.4.3
+    Checking chrono v0.4.44
+    Checking anyhow v1.0.102
+    Checking moxcms v0.8.1
+    Checking gemm-f16 v0.19.0
+   Compiling socket2 v0.6.3
+   Compiling mio v1.2.0
+   Compiling schannel v0.1.29
+   Compiling dirs-sys v0.5.0
+    Checking gemm v0.19.0
+   Compiling tokio v1.52.1
+   Compiling native-tls v0.2.18
+   Compiling dirs v6.0.0
+    Checking anstyle-wincon v3.0.11
+    Checking anstyle-query v1.1.5
+   Compiling ureq v2.12.1
+    Checking nu-ansi-term v0.50.3
+    Checking anstream v1.0.0
+    Checking owned_ttf_parser v0.25.1
+    Checking ab_glyph v0.2.32
+    Checking clap_builder v4.6.0
+    Checking tracing-subscriber v0.3.23
+    Checking tracing-chrome v0.7.2
+    Checking clap v4.6.1
+    Checking image v0.25.10
+    Checking candle-core v0.10.2 (J:\candle-src\candle-core)
+    Checking nalgebra v0.34.2
+    Checking tokio-util v0.7.18
+    Checking tokio-native-tls v0.3.1
+    Checking tower v0.5.3
+    Checking tower-http v0.6.8
+    Checking h2 v0.4.13
+   Compiling hyper v1.9.0
+    Checking candle-nn v0.10.2 (J:\candle-src\candle-nn)
+   Compiling hyper-util v0.1.20
+    Checking candle-transformers v0.10.2 (J:\candle-src\candle-transformers)
+    Checking imageproc v0.26.1
+    Checking hyper-tls v0.6.0
+   Compiling reqwest v0.12.28
+    Checking hf-hub v0.4.3
+   Compiling candle-examples v0.10.2 (J:\candle-src\candle-examples)
+warning: function `save_adapter` is never used
+  --> candle-examples\examples\qwen-lora-train\adapter.rs:59:8
+   |
+59 | pub fn save_adapter(
+   |        ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `source` and `avg_logprob` are never read
+  --> candle-examples\examples\qwen-lora-train\dataset.rs:22:9
+   |
+18 | pub struct Pair {
+   |            ---- fields in this struct
+...
+22 |     pub source: String,
+   |         ^^^^^^
+23 |     #[serde(default)]
+24 |     pub avg_logprob: Option<f32>,
+   |         ^^^^^^^^^^^
+   |
+   = note: `Pair` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `iter` is never used
+  --> candle-examples\examples\qwen-lora-train\dataset.rs:65:12
+   |
+31 | impl Dataset {
+   | ------------ method in this implementation
+...
+65 |     pub fn iter(&self) -> impl Iterator<Item = &Pair> {
+   |            ^^^^
+
+warning: function `batch_to_tensors` is never used
+   --> candle-examples\examples\qwen-lora-train\dataset.rs:132:8
+    |
+132 | pub fn batch_to_tensors(
+    |        ^^^^^^^^^^^^^^^^
+
+warning: struct `LoRAConfig` is never constructed
+  --> candle-examples\examples\qwen-lora-train\lora.rs:14:12
+   |
+14 | pub struct LoRAConfig {
+   |            ^^^^^^^^^^
+
+warning: struct `LoRALinear` is never constructed
+  --> candle-examples\examples\qwen-lora-train\lora.rs:35:12
+   |
+35 | pub struct LoRALinear {
+   |            ^^^^^^^^^^
+
+warning: associated items `new` and `forward_delta` are never used
+  --> candle-examples\examples\qwen-lora-train\lora.rs:49:12
+   |
+42 | impl LoRALinear {
+   | --------------- associated items in this implementation
+...
+49 |     pub fn new(
+   |            ^^^
+...
+90 |     pub fn forward_delta(&self, x: &Tensor, training: bool) -> Result<Tensor> {
+   |            ^^^^^^^^^^^^^
+
+warning: function `add_lora_delta` is never used
+   --> candle-examples\examples\qwen-lora-train\lora.rs:110:8
+    |
+110 | pub fn add_lora_delta(base_out: &Tensor, adapter: &LoRALinear, adapter_input: &Tensor, training: bool) -> Result<Tensor> {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `param_norms` is never used
+   --> candle-examples\examples\qwen-lora-train\lora.rs:123:8
+    |
+123 | pub fn param_norms(adapter: &LoRALinear) -> Result<(f64, f64)> {
+    |        ^^^^^^^^^^^
+
+warning: `candle-examples` (example "qwen-lora-train") generated 9 warnings
+    Finished `release` profile [optimized] target(s) in 33.37s
