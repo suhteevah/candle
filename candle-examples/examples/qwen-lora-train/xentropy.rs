@@ -36,24 +36,28 @@
 //! has backward lineage to ALL chunks' hidden state sources, so gradient
 //! flows correctly to every LoRA adapter upstream.
 
-use candle::{DType, Module, Result, Tensor, D};
+use candle::{DType, Result, Tensor};
 use candle_nn::ops;
 
 /// Tile-aware cross-entropy. `hidden` is `[B, L, H]` (post-norm pre-
-/// lm_head); `lm_head` is the final projection module; `targets` and
-/// `loss_mask` are `[B, L]`. Returns a scalar loss averaged over unmasked
-/// positions.
+/// lm_head); `apply_head` is a closure that projects hidden to logits
+/// (works for both `candle_nn::Linear` for fp paths AND `QMatMul.forward`
+/// for the QLoRA path); `targets` and `loss_mask` are `[B, L]`. Returns
+/// a scalar loss averaged over unmasked positions.
 ///
 /// The chunking is applied on the sequence dimension. `chunk_size <= 0`
-/// disables chunking and falls back to a single-shot compute (equivalent to
-/// the non-tiled masked_cross_entropy).
-pub fn tiled_cross_entropy(
+/// disables chunking and falls back to a single-shot compute (equivalent
+/// to the non-tiled masked_cross_entropy).
+pub fn tiled_cross_entropy<F>(
     hidden: &Tensor,
-    lm_head: &candle_nn::Linear,
+    apply_head: F,
     targets: &Tensor,
     loss_mask: &Tensor,
     chunk_size: usize,
-) -> Result<Tensor> {
+) -> Result<Tensor>
+where
+    F: Fn(&Tensor) -> Result<Tensor>,
+{
     let (b_sz, seq_len, _h) = hidden.dims3()?;
     let (tb, tl) = targets.dims2()?;
     assert_eq!(
@@ -64,7 +68,7 @@ pub fn tiled_cross_entropy(
 
     // Single-shot path — useful for short sequences or debugging.
     if chunk_size == 0 || chunk_size >= seq_len {
-        let logits = hidden.apply(lm_head)?;
+        let logits = apply_head(hidden)?;
         return compute_masked_ce(&logits, targets, loss_mask);
     }
 
@@ -92,7 +96,7 @@ pub fn tiled_cross_entropy(
         // a sync. Instead, always compute — per-chunk cost is small
         // compared to the sync we were saving. For a typical matt-voice
         // pair most chunks have at least some mask=1 positions anyway.
-        let logits_chunk = h_chunk.apply(lm_head)?;
+        let logits_chunk = apply_head(&h_chunk)?;
         let chunk_nll_sum = compute_masked_ce_sum(&logits_chunk, &t_chunk, &m_chunk)?;
         nll_sum = Some(match nll_sum {
             Some(s) => (s + chunk_nll_sum)?,
@@ -154,6 +158,3 @@ fn compute_masked_ce_sum(
     weighted.affine(-1.0, 0.0)
 }
 
-// silence dead-import warning for D until we add a fused-backward variant
-#[allow(dead_code)]
-fn _type_fence(_d: D) {}
