@@ -1,0 +1,184 @@
+{
+  "_doc": [
+    "Ranked hypothesis list for the TDPI loop. Order = expected ROI",
+    "(highest first). Each hypothesis has:",
+    "",
+    "  id                     — short identifier for log/summary",
+    "  title                  — one-line description",
+    "  baseline_preset        — key into BENCH_BASELINE.json to compare against",
+    "  test_preset            — key into bench/run-bench.ps1 presets",
+    "  primary_metric         — 'tok_per_sec' | 'peak_vram_mb' | 'step_ms_median'",
+    "  direction              — 'increase' for speed; 'decrease' for VRAM/latency",
+    "  threshold_pct          — minimum movement to count as accepted (e.g. 2.0 = +2%)",
+    "  regression_tolerance_pct — guards: other metrics may regress at most this much",
+    "  requires_code_change   — true for hypotheses we can't auto-test (skipped)",
+    "",
+    "The loop accepts when primary moves >= threshold AND no other metric",
+    "regresses by more than tolerance. Otherwise rejects."
+  ],
+  "hypotheses": [
+    {
+      "id": "F-cechunk32-s128",
+      "title": "Chunked cross-entropy with chunk=32 at seq=128 — verify the +0 logits-transient claim doesn't regress tok/s",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "q4km-7b-r8-qv-s128-gc-cechunk32",
+      "primary_metric": "peak_vram_mb",
+      "direction": "decrease",
+      "threshold_pct": 0.5,
+      "regression_tolerance_pct": 5.0
+    },
+    {
+      "id": "A-prequant-s128",
+      "title": "--prequantize-base on 8GB at seq=128 — likely OOM since it adds ~10GB. Expected verdict: reject (no_baseline / OOM).",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "q4km-7b-r8-qv-s128-gc-prequant",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 50.0,
+      "regression_tolerance_pct": 200.0
+    },
+    {
+      "id": "H-fuseqkv-s128",
+      "title": "--fuse-qkv at seq=128 — needs prequant which OOMs on 8GB. Defer to cnc 16GB. Expected verdict: skipped on kokonoe.",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "q4km-7b-r8-qv-s128-gc-prequant-fq",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 5.0,
+      "regression_tolerance_pct": 5.0
+    },
+    {
+      "id": "F-cechunk32-s256",
+      "title": "Chunked CE at seq=256 — bigger logits transient saved here, real tok/s gain expected if seq=256 was previously memory-bound",
+      "baseline_preset": "q4km-7b-r8-qv-s256-gc",
+      "test_preset": "q4km-7b-r8-qv-s256-gc-cechunk32",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 1.0,
+      "regression_tolerance_pct": 5.0,
+      "_note": "test_preset doesn't exist yet in run-bench.ps1; add it before running"
+    },
+    {
+      "id": "all-on-s128",
+      "title": "All flags on at seq=128 — sanity that the combination is no worse than the baseline; only meaningful with prequant which is 8GB-OOM",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "q4km-7b-r8-qv-s128-gc-all-on",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 5.0,
+      "regression_tolerance_pct": 5.0
+    },
+    {
+      "id": "Q-merge-inference",
+      "title": "Adapter merge mode for inference (10-20% decode speedup claim)",
+      "baseline_preset": "INFERENCE",
+      "test_preset": "INFERENCE",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 5.0,
+      "regression_tolerance_pct": 5.0,
+      "requires_code_change": true,
+      "_note": "Need a separate inference-bench harness; current --benchmark only covers training."
+    },
+    {
+      "id": "K-sse-streaming",
+      "title": "SSE streaming overhead vs blocking /generate (must be neutral or near-neutral)",
+      "baseline_preset": "INFERENCE",
+      "test_preset": "INFERENCE",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": -2.0,
+      "regression_tolerance_pct": 3.0,
+      "requires_code_change": true,
+      "_note": "Inference harness needed."
+    },
+    {
+      "id": "code-fp16-loss-scale",
+      "title": "Sprint 1 S1: fp16 activations + dynamic loss scaling (Pascal-friendly)",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "TBD",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 30.0,
+      "regression_tolerance_pct": 5.0,
+      "requires_code_change": true
+    },
+    {
+      "id": "code-tiled-qmatmul-bwd",
+      "title": "Tile QMatMul backward dequant along N (lift seq=512 OOM ceiling on 8GB)",
+      "baseline_preset": "q4km-7b-r8-qv-s512-gc",
+      "test_preset": "TBD",
+      "primary_metric": "peak_vram_mb",
+      "direction": "decrease",
+      "threshold_pct": 5.0,
+      "regression_tolerance_pct": 5.0,
+      "requires_code_change": true
+    },
+    {
+      "id": "code-cuda-graph-decode",
+      "title": "CUDA Graph capture for decode (1.2-1.5× inference speedup target)",
+      "baseline_preset": "INFERENCE",
+      "test_preset": "INFERENCE",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 15.0,
+      "regression_tolerance_pct": 3.0,
+      "requires_code_change": true
+    },
+    {
+      "id": "code-fa2-forward-only",
+      "title": "Wire candle-flash-attn forward (Volta+ only) for inference; manual softmax-dropout-matmul backward off training path",
+      "baseline_preset": "INFERENCE",
+      "test_preset": "INFERENCE",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 30.0,
+      "regression_tolerance_pct": 3.0,
+      "requires_code_change": true
+    },
+    {
+      "id": "code-real-fused-rope-cuda",
+      "title": "Real CUDA-fused RoPE (replaces composed-ops, real backward kernel — multi-day)",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "TBD",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 5.0,
+      "regression_tolerance_pct": 5.0,
+      "requires_code_change": true
+    },
+    {
+      "id": "code-pinned-async-loader",
+      "title": "Diagnose + fix prefetch.rs stall to overlap CPU tokenize with GPU forward",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "TBD",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 3.0,
+      "regression_tolerance_pct": 3.0,
+      "requires_code_change": true
+    },
+    {
+      "id": "code-tf32-on-ampere",
+      "title": "Enable TF32 matmul mode on Ampere via cublasMath_t (free 2× on small matmuls)",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "TBD",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 10.0,
+      "regression_tolerance_pct": 3.0,
+      "requires_code_change": true
+    },
+    {
+      "id": "code-persistent-grad-bufs",
+      "title": "Persistent gradient buffers across accumulation steps (less alloc churn)",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "TBD",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 3.0,
+      "regression_tolerance_pct": 3.0,
+      "requires_code_change": true
+    }
+  ]
+}

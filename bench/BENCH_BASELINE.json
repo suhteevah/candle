@@ -1,0 +1,92 @@
+{
+  "_doc": [
+    "Locked baseline numbers for the TDPI loop. Each entry is a SINGLE",
+    "verified bench run on a SPECIFIC commit on a SPECIFIC host with the",
+    "harness from bench/run-bench.ps1. Do not edit numbers without a",
+    "linked log file in bench/results/.",
+    "",
+    "Baselines are per-host because GPU utilization depends on which",
+    "physical card we ran on. Add a new top-level host key when",
+    "introducing a new test machine.",
+    "",
+    "When tonight's wins are bench-verified, update commit + numbers.",
+    "Until then they are MARKED unverified to be honest about it."
+  ],
+  "kokonoe": {
+    "host": {
+      "gpu": "RTX 3070 Ti",
+      "vram_mb": 8192,
+      "compute_cap": 86,
+      "driver_at_baseline": "TBD"
+    },
+    "presets": {
+      "q4km-7b-r8-qv-s128-gc": {
+        "commit": "5c9ac93",
+        "branch": "matt-voice-lora",
+        "verified_run_at": "2026-04-23T23:33:00",
+        "tok_per_sec": 5.5,
+        "step_ms_median": 53933.46,
+        "step_ms_p95": 55963.64,
+        "peak_vram_mb": 7919,
+        "mean_gpu_util": 93.4,
+        "log_file": "logs/7b-s128.log",
+        "notes": "Pre-tonight baseline — fused softmax + fused RMSNorm shipped, no prequantize_base, no fuse_qkv, no chunked CE."
+      },
+      "q4km-7b-r8-qv-s256-gc": {
+        "commit": "5c9ac93",
+        "branch": "matt-voice-lora",
+        "verified_run_at": "2026-04-23T23:35:00",
+        "tok_per_sec": 5.7,
+        "step_ms_median": 53111.25,
+        "step_ms_p95": 60635.85,
+        "peak_vram_mb": 7918,
+        "mean_gpu_util": 93.8,
+        "log_file": "logs/7b-s256.log"
+      },
+      "q4km-7b-r8-qv-s512-gc": {
+        "commit": "5c9ac93",
+        "branch": "matt-voice-lora",
+        "verified_run_at": "2026-04-23T23:36:00",
+        "tok_per_sec": 5.8,
+        "step_ms_median": 52179.69,
+        "step_ms_p95": 61696.92,
+        "peak_vram_mb": 7918,
+        "mean_gpu_util": 93.7,
+        "log_file": "logs/7b-s512.log"
+      }
+    }
+  },
+  "_unverified_claims_to_test": {
+    "_doc": "Tonight's commits added the following claims that have NOT been bench-verified. The TDPI loop will measure each.",
+    "claims": [
+      {
+        "win": "F (chunked CE)",
+        "commit": "b8556d7",
+        "preset_to_test": "q4km-7b-r8-qv-s128-gc-cechunk32",
+        "claim": "frees ~155 MB logits transient at seq=256; no measured tok/s impact",
+        "expected_signal": "neutral or slight tok/s gain at seq>=256; peak_vram_mb drops by ~50-150 MB"
+      },
+      {
+        "win": "A (--prequantize-base)",
+        "commit": "b8556d7",
+        "preset_to_test": "q4km-7b-r8-qv-s128-gc-prequant",
+        "claim": "2-3× QLoRA backward speedup",
+        "expected_signal": "tok_per_sec roughly 2-3× baseline (if true), peak_vram_mb up by ~10 GB (won't fit on 8GB)"
+      },
+      {
+        "win": "Q (adapter merge)",
+        "commit": "f624808",
+        "preset_to_test": "INFERENCE — needs separate harness",
+        "claim": "10-20% decode speedup",
+        "expected_signal": "TBD — training bench doesn't exercise inference path"
+      },
+      {
+        "win": "H (--fuse-qkv)",
+        "commit": "fcd5d56",
+        "preset_to_test": "q4km-7b-r8-qv-s128-gc-prequant-fq",
+        "claim": "5-10% attention speedup",
+        "expected_signal": "tok_per_sec gain of 0.05-0.1× over prequant baseline; same peak_vram_mb"
+      }
+    ]
+  }
+}
