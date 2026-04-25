@@ -61,6 +61,48 @@ use lora::LoRAConfig;
 use qwen2_lora::TargetModule;
 use qwen2_lora_quantized::Model;
 
+/// Result of `Engine::bench_decode`. Single-line BENCH_INFER JSON output
+/// is built from this — kept stable so bench/run-bench-infer.ps1 can
+/// regex it out reliably.
+#[derive(Debug, Serialize)]
+struct BenchInferResult {
+    /// Tokens per second AFTER the first sampled token (excludes prefill).
+    decode_tok_per_sec: f64,
+    /// Wall ms from start to first sampled token (includes prefill).
+    first_token_ms: f64,
+    /// Wall ms for the prefill forward (full prompt at index_pos=0).
+    prefill_ms: f64,
+    /// Wall ms for the decode loop (n_tokens-1 forwards).
+    decode_ms: f64,
+    /// Total wall ms.
+    total_ms: f64,
+    /// Number of generated tokens (matches `--benchmark-decode N`).
+    n_tokens: usize,
+    /// Prompt length (input tokens before generation).
+    prompt_len: usize,
+    /// Peak VRAM during the run, in MB. None if nvidia-smi unavailable.
+    peak_vram_mb: Option<u64>,
+}
+
+/// Best-effort peak VRAM from nvidia-smi. Single shot — caller is
+/// responsible for taking the max across multiple samples if they want
+/// a true peak. We use a single sample at end-of-run; the steady-state
+/// VRAM for an inference workload is largely flat after warm-up.
+fn peak_vram_mb_via_nvidia_smi() -> Option<u64> {
+    let output = std::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=memory.used",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(output.stdout).ok()?;
+    s.lines().next()?.trim().parse::<u64>().ok()
+}
+
 /// HF tokenizer_config.json shape — only the chat_template field is read.
 /// Some configs ship `chat_template` as a string; others as an array of
 /// `{name, template}` dicts. We pick the default (no `name`) entry when
@@ -212,6 +254,18 @@ struct Args {
     /// with `--merge-adapters` (which also implies prequantize_base).
     #[arg(long)]
     fuse_qkv: bool,
+
+    /// Benchmark-decode mode. When set, generate exactly N tokens (no
+    /// EOS-early-stop) using `--prompt`, then print a single-line JSON:
+    ///   `BENCH_INFER {"decode_tok_per_sec":...,"first_token_ms":...,"total_ms":...,"peak_vram_mb":...}`
+    /// and exit 0. Used by bench/run-bench-infer.ps1 for deterministic
+    /// inference-side A/B testing of adapter-merge, fuse-qkv, etc.
+    #[arg(long)]
+    benchmark_decode: Option<usize>,
+
+    /// Bench-only label embedded in the BENCH_INFER line for grep-ability.
+    #[arg(long, default_value = "")]
+    bench_label: String,
 
     /// CLI mode: generate one response for this prompt, print, exit.
     #[arg(long)]
@@ -671,6 +725,84 @@ impl Engine {
         self.generate(&prompt, max_tokens, temperature, top_p, seed)
     }
 
+    /// Deterministic decode benchmark. Generates exactly `n_tokens`
+    /// without EOS-early-stop, sampling argmax for reproducibility.
+    /// Returns timing breakdown for the BENCH_INFER JSON line.
+    ///
+    /// Phases:
+    ///   prefill_ms     — full-prompt forward (most of which overlaps
+    ///                    with first-token decode in real serving).
+    ///   first_token_ms — wall clock from start to first sampled token,
+    ///                    INCLUDING prefill.
+    ///   decode_ms      — wall clock from first token to last token.
+    ///   decode_tok_per_sec — (n_tokens - 1) / decode_ms.
+    ///   total_ms       — full wall clock.
+    fn bench_decode(
+        &mut self,
+        prompt: &str,
+        n_tokens: usize,
+    ) -> Result<BenchInferResult> {
+        use std::time::Instant;
+        if n_tokens < 2 {
+            anyhow::bail!("benchmark_decode requires n_tokens >= 2");
+        }
+        self.model.clear_kv_cache();
+
+        let total_start = Instant::now();
+
+        let enc = self
+            .tokenizer
+            .encode(prompt, true)
+            .map_err(|e| anyhow::anyhow!("encode: {e}"))?;
+        let prompt_ids: Vec<u32> = enc.get_ids().to_vec();
+        let prompt_len = prompt_ids.len();
+
+        // ArgMax sampling for determinism — bench should be repeatable.
+        let mut logits_proc =
+            LogitsProcessor::from_sampling(0, Sampling::ArgMax);
+
+        // Prefill.
+        let prefill_start = Instant::now();
+        let prompt_tensor =
+            Tensor::new(prompt_ids.as_slice(), &self.device)?.unsqueeze(0)?;
+        let mut logits = self.model.forward(&prompt_tensor, 0)?;
+        let prefill_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
+        let mut next_token = logits_proc.sample(&logits.squeeze(0)?)?;
+        let first_token_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
+
+        // Decode loop — exactly n_tokens-1 more tokens (we already have 1).
+        let decode_start = Instant::now();
+        let mut index_pos = prompt_len;
+        for _ in 1..n_tokens {
+            let inp = Tensor::new(&[next_token], &self.device)?.unsqueeze(0)?;
+            logits = self.model.forward(&inp, index_pos)?;
+            next_token = logits_proc.sample(&logits.squeeze(0)?)?;
+            index_pos += 1;
+        }
+        let decode_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
+        let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+        let decoded_tokens = (n_tokens - 1) as f64;
+        let decode_tok_per_sec = if decode_ms > 0.0 {
+            decoded_tokens / (decode_ms / 1000.0)
+        } else {
+            0.0
+        };
+
+        // Best-effort peak VRAM from nvidia-smi.
+        let peak_vram_mb = peak_vram_mb_via_nvidia_smi();
+
+        Ok(BenchInferResult {
+            decode_tok_per_sec,
+            first_token_ms,
+            prefill_ms,
+            decode_ms,
+            total_ms,
+            n_tokens,
+            prompt_len,
+            peak_vram_mb,
+        })
+    }
+
     /// Streaming variant of `chat`. Renders the chat template then calls
     /// `generate_streaming`.
     fn chat_streaming(
@@ -877,6 +1009,26 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let mut engine = Engine::load(&args)?;
+
+    // Benchmark-decode mode: deterministic n-token decode, emit
+    // single-line `BENCH_INFER {...}` JSON, exit 0.
+    if let Some(n_tokens) = args.benchmark_decode {
+        let prompt = args.prompt.as_deref().unwrap_or(
+            "The quick brown fox jumps over the lazy dog. \
+             Write a short story about that fox's next adventure.",
+        );
+        let result = engine.bench_decode(prompt, n_tokens)?;
+        // Emit a single-line JSON keyed BENCH_INFER for the runner to grep.
+        let mut json = serde_json::to_value(&result)?;
+        if let Some(obj) = json.as_object_mut() {
+            obj.insert(
+                "label".into(),
+                serde_json::Value::String(args.bench_label.clone()),
+            );
+        }
+        println!("BENCH_INFER {}", serde_json::to_string(&json)?);
+        return Ok(());
+    }
 
     // CLI mode — generate once and exit.
     if let Some(prompt) = args.prompt.as_ref() {

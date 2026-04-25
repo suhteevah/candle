@@ -79,18 +79,23 @@ def append_perf_log(entry: str) -> None:
 
 
 def run_bench(preset: str, dry_run: bool) -> dict | None:
-    """Invoke run-bench.ps1 with the preset. Returns parsed result dict or None."""
+    """Invoke the right runner based on preset prefix. Returns parsed
+    result dict (training schema OR inference schema) or None."""
     if dry_run:
         print(f"[dry-run] would run preset={preset}")
         return None
+    # Inference presets start with "infer-"; everything else is training.
+    if preset.startswith("infer-"):
+        runner = BENCH_DIR / "run-bench-infer.ps1"
+    else:
+        runner = RUNNER
     cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-           "-File", str(RUNNER), preset]
-    print(f"[bench] starting preset={preset}", flush=True)
+           "-File", str(runner), preset]
+    print(f"[bench] starting preset={preset} via {runner.name}", flush=True)
     proc = subprocess.run(cmd, cwd=str(ROOT))
     if proc.returncode != 0:
         print(f"[bench] FAILED rc={proc.returncode}", flush=True)
         return None
-    # Locate the JSON output (run-bench writes <preset>-<commit>.json).
     commit = subprocess.check_output(
         ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT)
     ).decode().strip()
@@ -155,22 +160,27 @@ def compare(result: dict, baseline: dict, hypothesis: dict) -> tuple[str, str]:
 
 
 def update_baseline(host: str, preset: str, result: dict) -> None:
+    """Update baseline in place. Schema-flexible: copies whatever metric
+    fields the result dict carries (training: tok_per_sec/step_ms/...
+    vs inference: decode_tok_per_sec/first_token_ms/...). Preserves the
+    prior accepted run in `_history`."""
     baseline = load_json(BASELINE_PATH)
     presets = baseline.setdefault(host, {}).setdefault("presets", {})
     history = presets.setdefault(preset, {}).setdefault("_history", [])
-    if "commit" in presets[preset]:
-        history.append({k: presets[preset][k] for k in presets[preset] if not k.startswith("_")})
-    presets[preset].update({
-        "commit": result["commit"],
-        "branch": result["branch"],
-        "verified_run_at": result["run_at"],
-        "tok_per_sec": result["tok_per_sec"],
-        "step_ms_median": result["step_ms_median"],
-        "step_ms_p95": result["step_ms_p95"],
-        "peak_vram_mb": result["peak_vram_mb"],
-        "mean_gpu_util": result["mean_gpu_util"],
-        "log_file": result["log_file"],
-    })
+    if presets[preset].get("commit") and presets[preset].get("commit") != "TBD":
+        history.append({
+            k: v for k, v in presets[preset].items()
+            if not k.startswith("_") and k != "_history"
+        })
+    # Carry every numeric / string field from the result, plus the
+    # commit/branch/run_at meta. Skip None values from the inference
+    # fall-through case where nvidia-smi failed.
+    for k, v in result.items():
+        if v is not None:
+            presets[preset][k] = v
+    presets[preset]["commit"] = result["commit"]
+    presets[preset]["branch"] = result["branch"]
+    presets[preset]["verified_run_at"] = result["run_at"]
     write_json(BASELINE_PATH, baseline)
 
 

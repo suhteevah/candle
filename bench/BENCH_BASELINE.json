@@ -53,6 +53,14 @@
         "peak_vram_mb": 7918,
         "mean_gpu_util": 93.7,
         "log_file": "logs/7b-s512.log"
+      },
+      "infer-7b-baseline": {
+        "_doc": "Inference baseline — no flags, default base+adapter forward path. Numbers TBD on first run.",
+        "commit": "TBD",
+        "decode_tok_per_sec": null,
+        "first_token_ms": null,
+        "prefill_ms": null,
+        "peak_vram_mb": null
       }
     }
   },

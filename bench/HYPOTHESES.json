@@ -71,26 +71,45 @@
     {
       "id": "Q-merge-inference",
       "title": "Adapter merge mode for inference (10-20% decode speedup claim)",
-      "baseline_preset": "INFERENCE",
-      "test_preset": "INFERENCE",
-      "primary_metric": "tok_per_sec",
+      "baseline_preset": "infer-7b-baseline",
+      "test_preset": "infer-7b-merge",
+      "primary_metric": "decode_tok_per_sec",
       "direction": "increase",
       "threshold_pct": 5.0,
       "regression_tolerance_pct": 5.0,
-      "requires_code_change": true,
-      "_note": "Need a separate inference-bench harness; current --benchmark only covers training."
+      "_note": "Implies prequant which may OOM on 8GB; expect inconclusive on kokonoe."
+    },
+    {
+      "id": "Q-merge-fq-inference",
+      "title": "Adapter merge + fused QKV for inference (combined claim ~15-30%)",
+      "baseline_preset": "infer-7b-baseline",
+      "test_preset": "infer-7b-merge-fq",
+      "primary_metric": "decode_tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 10.0,
+      "regression_tolerance_pct": 5.0
+    },
+    {
+      "id": "A-prequant-inference",
+      "title": "--prequantize-base inference (decode speedup from skipping per-token QMatMul dequant)",
+      "baseline_preset": "infer-7b-baseline",
+      "test_preset": "infer-7b-prequant",
+      "primary_metric": "decode_tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 5.0,
+      "regression_tolerance_pct": 5.0
     },
     {
       "id": "K-sse-streaming",
-      "title": "SSE streaming overhead vs blocking /generate (must be neutral or near-neutral)",
-      "baseline_preset": "INFERENCE",
-      "test_preset": "INFERENCE",
-      "primary_metric": "tok_per_sec",
+      "title": "SSE streaming overhead — should be neutral vs /generate (re-decode-full-vec might hurt)",
+      "baseline_preset": "infer-7b-baseline",
+      "test_preset": "infer-7b-baseline",
+      "primary_metric": "decode_tok_per_sec",
       "direction": "increase",
       "threshold_pct": -2.0,
-      "regression_tolerance_pct": 3.0,
+      "regression_tolerance_pct": 5.0,
       "requires_code_change": true,
-      "_note": "Inference harness needed."
+      "_note": "Need an SSE-mode bench (different code path than --benchmark-decode). Defer until inference harness is mature."
     },
     {
       "id": "code-fp16-loss-scale",
