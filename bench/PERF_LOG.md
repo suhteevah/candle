@@ -114,3 +114,68 @@ margin — adding 172 MB pushes it OOM.
 Commit `b8556d7` ("qwen-lora-train: --prequantize-base + chunked
 cross-entropy") is wrong about chunked CE on 8GB at the configurations
 matt-voice uses. The flag is not safe to enable in tonight's run.
+
+## [2026-04-25T16:53:00] F-cechunk32-s128 (Win D fix attempt) — REJECT (OOM again)
+
+- Win D: `tiled_cross_entropy_with_backward` — per-chunk backward into
+  shared GradStore, detached chunk_log accumulator for the return value.
+  Theory: severs the autograd retention from the 16:23 OOM.
+- baseline preset: `q4km-7b-r8-qv-s128-gc` (5.5 tok/s, 7919 MB peak)
+- test preset: `q4km-7b-r8-qv-s128-gc-cechunk32`, post-fix binary
+- result: `DriverError(CUDA_ERROR_OUT_OF_MEMORY)` again, during measured-step phase
+- log: `bench/results/q4km-7b-r8-qv-s128-gc-cechunk32-4eda26a-20260425-165353.log`
+
+### Why the fix didn't work
+
+The per-chunk-backward design is sound — each chunk's backward through
+the autograd graph DOES drop after the chunk's `backward_into` returns.
+The OOM still happens, so the cause is NOT the autograd retention I
+diagnosed at 16:23. Other candidates I haven't ruled out:
+
+1. **cudnn/cublas algorithm cache.** Chunked matmuls have a different
+   shape than the single-shot one, and cuBLAS may pick a different
+   algorithm with different workspace requirements. The cache could
+   hold the workspace alive longer than expected.
+
+2. **lm_head weight pre-dequant interaction.** The 1.1 GB f16 lm_head
+   gets matmul'd 4 times instead of 1. The cuBLAS handle's transient
+   buffers may not fully release between calls.
+
+3. **GC + chunked backward composition.** Each chunk's backward
+   through `narrow(hidden)` deposits a sparse gradient into the
+   last-layer-input slot in the checkpoint context. Then
+   `backward_through_checkpoints` propagates. Maybe the slot retains
+   intermediates between chunk backwards, accumulating instead of
+   coalescing.
+
+4. **The single-shot path on 8GB just doesn't have headroom for ANY
+   chunked variant.** Baseline peak 7919 MB on 8192 MB card has ~270 MB
+   margin; any per-chunk overhead (algorithm cache + extra cuBLAS
+   handles + workspace) eats it.
+
+### Real conclusion
+
+**Chunked CE is not deployable on 8GB at seq=128 regardless of the
+retention design.** The fix may work on bigger VRAM cards (cnc 16GB
+when it's back). Marking the hypothesis CONDITIONAL: re-test on
+>=16GB cards.
+
+### Action
+
+1. Keep `tiled_cross_entropy_with_backward` in tree (the fix is
+   architecturally cleaner; no harm in shipping it). chunk_size=0
+   path is unchanged.
+2. **Update HYPOTHESES.json**: F-cechunk32-s128 marked permanently
+   REJECTED on 8GB; create new F-cechunk32-cnc16gb hypothesis to be
+   tested when cnc thermal solved.
+3. `--ce-chunk-size 32` stays out of the matt-voice overnight script.
+   Already removed at commit 4f5d85f.
+
+### Honesty escalation
+
+Two rejected attempts at the same memory win. The "frees ~155 MB"
+claim was naively optimistic — the actual memory landscape on 8GB
+is tighter than the back-of-envelope math suggested. Future "saves
+memory" claims should explicitly include a baseline-peak-vs-test-peak
+delta from a real run, not just a per-tensor calculation.
+

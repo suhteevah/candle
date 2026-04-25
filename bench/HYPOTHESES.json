@@ -19,13 +19,15 @@
   "hypotheses": [
     {
       "id": "F-cechunk32-s128",
-      "title": "Chunked cross-entropy with chunk=32 at seq=128 — verify the +0 logits-transient claim doesn't regress tok/s",
+      "title": "Chunked CE chunk=32 at seq=128 — REJECTED 2x on 8GB (autograd retention + per-chunk-bwd both OOM). Defer to >=16GB.",
+      "_status": "REJECTED 2026-04-25 (OOM) and 2026-04-25 (OOM with retention fix)",
       "baseline_preset": "q4km-7b-r8-qv-s128-gc",
       "test_preset": "q4km-7b-r8-qv-s128-gc-cechunk32",
       "primary_metric": "peak_vram_mb",
       "direction": "decrease",
       "threshold_pct": 0.5,
-      "regression_tolerance_pct": 5.0
+      "regression_tolerance_pct": 5.0,
+      "skip_on_kokonoe": true
     },
     {
       "id": "A-prequant-s128",

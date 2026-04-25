@@ -560,29 +560,31 @@ fn main() -> Result<()> {
                     let mut ctx = checkpoint::CheckpointContext::new();
                     let (hidden, attn_mask) =
                         model.forward_train_with_checkpoint(&shifted_input, &mut ctx)?;
-                    let loss = xentropy::tiled_cross_entropy(
+                    let mut grads = candle::backprop::GradStore::default();
+                    let _scaled_loss = xentropy::tiled_cross_entropy_with_backward(
                         &hidden,
                         |h| model.apply_lm_head(h),
                         &shifted_target,
                         &shifted_mask,
                         args.ce_chunk_size,
+                        &mut grads,
+                        1.0 / args.grad_accum_steps as f64,
                     )?;
-                    let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
-                    let mut grads = candle::backprop::GradStore::default();
-                    scaled_loss.backward_into(&mut grads, None)?;
                     model.backward_through_checkpoints(&ctx, &mut grads, attn_mask.as_ref())?;
                     optim.step(&grads)?;
                 } else {
                     let hidden = model.forward_train(&shifted_input)?;
-                    let loss = xentropy::tiled_cross_entropy(
+                    let mut grads = candle::backprop::GradStore::default();
+                    let _scaled_loss = xentropy::tiled_cross_entropy_with_backward(
                         &hidden,
                         |h| model.apply_lm_head(h),
                         &shifted_target,
                         &shifted_mask,
                         args.ce_chunk_size,
+                        &mut grads,
+                        1.0 / args.grad_accum_steps as f64,
                     )?;
-                    let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
-                    optim.backward_step(&scaled_loss)?;
+                    optim.step(&grads)?;
                 }
                 step_tokens += tok.input_ids.len().saturating_sub(1);
             }
@@ -639,43 +641,45 @@ fn main() -> Result<()> {
             let shifted_target = input_ids.narrow(1, 1, seq_len - 1)?;
             let shifted_mask = loss_mask.narrow(1, 1, seq_len - 1)?;
 
-            let (loss, scaled_loss) = if args.gradient_checkpoint {
+            let loss = if args.gradient_checkpoint {
                 let mut ctx = checkpoint::CheckpointContext::new();
                 let (hidden, attn_mask) =
                     model.forward_train_with_checkpoint(&shifted_input, &mut ctx)?;
-                let loss = xentropy::tiled_cross_entropy(
+
+                // Per-chunk backward into a shared GradStore. With
+                // ce_chunk_size=0 this falls through to single-shot CE +
+                // single backward_into. With chunk_size > 0 this avoids
+                // the autograd retention bug that OOM'd kokonoe at
+                // seq=128 (see PERF_LOG.md F-cechunk32-s128).
+                let mut grads = candle::backprop::GradStore::default();
+                let scaled_loss = xentropy::tiled_cross_entropy_with_backward(
                     &hidden,
                     |h| model.apply_lm_head(h),
                     &shifted_target,
                     &shifted_mask,
                     args.ce_chunk_size,
+                    &mut grads,
+                    1.0 / args.grad_accum_steps as f64,
                 )?;
-                let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
-
-                // Drive the checkpointed backward: outer backward seeds grad
-                // at the post-layer-stack detach point, then each layer's
-                // forward is re-run in reverse with its Var grads
-                // accumulating into `grads`. Finally we hand `grads` to the
-                // optimizer directly instead of going through backward_step.
-                let mut grads = candle::backprop::GradStore::default();
-                scaled_loss.backward_into(&mut grads, None)?;
                 model.backward_through_checkpoints(&ctx, &mut grads, attn_mask.as_ref())?;
                 optim.step(&grads)?;
-                (loss, scaled_loss)
+                // Recover unscaled loss for logging.
+                scaled_loss.affine(args.grad_accum_steps as f64, 0.0)?
             } else {
                 let hidden = model.forward_train(&shifted_input)?;
-                let loss = xentropy::tiled_cross_entropy(
+                let mut grads = candle::backprop::GradStore::default();
+                let scaled_loss = xentropy::tiled_cross_entropy_with_backward(
                     &hidden,
                     |h| model.apply_lm_head(h),
                     &shifted_target,
                     &shifted_mask,
                     args.ce_chunk_size,
+                    &mut grads,
+                    1.0 / args.grad_accum_steps as f64,
                 )?;
-                let scaled_loss = (&loss * (1.0 / args.grad_accum_steps as f64))?;
-                optim.backward_step(&scaled_loss)?;
-                (loss, scaled_loss)
+                optim.step(&grads)?;
+                scaled_loss.affine(args.grad_accum_steps as f64, 0.0)?
             };
-            let _ = scaled_loss;
 
             accum_count += 1;
             accum_loss += loss.to_scalar::<f32>()?;

@@ -36,7 +36,7 @@
 //! has backward lineage to ALL chunks' hidden state sources, so gradient
 //! flows correctly to every LoRA adapter upstream.
 
-use candle::{DType, Result, Tensor};
+use candle::{backprop::GradStore, DType, Result, Tensor};
 use candle_nn::ops;
 
 /// Tile-aware cross-entropy. `hidden` is `[B, L, H]` (post-norm pre-
@@ -109,6 +109,119 @@ where
     // Device-side division. Result is a scalar tensor with full autograd
     // lineage through every chunk's logits → lm_head input → backward OK.
     total.broadcast_div(&denom_safe)
+}
+
+/// Chunked cross-entropy that does per-chunk backward INSIDE the loop,
+/// accumulating into the caller's `GradStore`. Returns a detached scalar
+/// tensor with the total loss for logging.
+///
+/// Why this exists (vs. `tiled_cross_entropy`): the naive chunked CE
+/// retains every chunk's logits + log_softmax + gather + mask product
+/// in the autograd graph until the outer backward pass, because each
+/// chunk's loss feeds into a shared `nll_sum` accumulator that the
+/// final scaled_loss ultimately backprops through. On 8GB at seq=128
+/// this added ~172 MB of retention, OOM'ing a baseline that fit
+/// cleanly. Verified in PERF_LOG.md entry F-cechunk32-s128.
+///
+/// Fix: backward each chunk's contribution immediately so its
+/// intermediates can drop. The caller hands in a `GradStore`; we
+/// invoke `Tensor::backward_into` per chunk with `1/denom * grad_scale`
+/// applied. Backward through the chunk's graph deposits gradients
+/// against:
+///   - the LoRA adapter Vars (touched by `apply_head`)
+///   - the input slice `h_chunk` (a `narrow` of `hidden`); narrow's
+///     backward then accumulates into hidden's grad in the shared
+///     GradStore. This composes correctly across chunks because each
+///     chunk's narrow writes a sparse gradient to a disjoint slice of
+///     hidden, and the GradStore merge handles the union.
+///
+/// The `total_loss_for_logging` accumulator is built via `.detach()`
+/// per chunk — it carries no autograd, so it doesn't pin any chunk's
+/// intermediates after that chunk's backward runs.
+///
+/// `chunk_size == 0 || >= seq_len` falls back to single-shot CE, runs
+/// `loss.affine(grad_scale, 0.0)?.backward_into(grads, None)?` once.
+///
+/// `grad_scale`: typically `1.0 / grad_accum_steps`. Applied to the
+/// loss before backward so the resulting gradients are pre-scaled and
+/// the optimizer step is correct.
+pub fn tiled_cross_entropy_with_backward<F>(
+    hidden: &Tensor,
+    apply_head: F,
+    targets: &Tensor,
+    loss_mask: &Tensor,
+    chunk_size: usize,
+    grads: &mut GradStore,
+    grad_scale: f64,
+) -> Result<Tensor>
+where
+    F: Fn(&Tensor) -> Result<Tensor>,
+{
+    let (b_sz, seq_len, _h) = hidden.dims3()?;
+    let (tb, tl) = targets.dims2()?;
+    assert_eq!((b_sz, seq_len), (tb, tl));
+
+    // Single-shot path — no chunking. Same memory/perf as the
+    // non-chunked tiled_cross_entropy + a single backward_into.
+    if chunk_size == 0 || chunk_size >= seq_len {
+        let logits = apply_head(hidden)?;
+        let loss = compute_masked_ce(&logits, targets, loss_mask)?;
+        let scaled = loss.affine(grad_scale, 0.0)?;
+        scaled.backward_into(grads, None)?;
+        return Ok(scaled.detach());
+    }
+
+    // Device-side scalar denom for numerical stability across chunks.
+    let mask_f = loss_mask.to_dtype(DType::F32)?;
+    let denom_sum = mask_f.sum_all()?;
+    let one_scalar = Tensor::new(1.0f32, hidden.device())?;
+    let denom_safe = denom_sum.broadcast_maximum(&one_scalar)?;
+
+    let mut total_loss_for_log: Option<Tensor> = None;
+    let mut start = 0usize;
+    while start < seq_len {
+        let this = (seq_len - start).min(chunk_size);
+        let h_chunk = hidden.narrow(1, start, this)?;
+        let t_chunk = targets.narrow(1, start, this)?;
+        let m_chunk = loss_mask.narrow(1, start, this)?;
+
+        // Forward through this chunk; build its autograd graph.
+        let logits_chunk = apply_head(&h_chunk)?;
+        let chunk_nll_sum = compute_masked_ce_sum(&logits_chunk, &t_chunk, &m_chunk)?;
+
+        // Per-chunk loss = chunk_nll_sum / denom_safe * grad_scale
+        // The denominator is the SAME across all chunks (sum over the
+        // full mask), so backprop through `total/denom` is equivalent
+        // to backprop through `(sum chunks)/denom = sum(chunk/denom)`.
+        // Each chunk's backward picks up its share of the gradient.
+        let chunk_scaled = chunk_nll_sum
+            .broadcast_div(&denom_safe)?
+            .affine(grad_scale, 0.0)?;
+
+        // Detached copy for the running loss-for-logging total. This
+        // doesn't pin the chunk's autograd graph — we'll backward then
+        // drop the chunk-scoped tensors.
+        let chunk_log = chunk_scaled.detach();
+
+        // Backward this chunk's contribution into the shared GradStore.
+        // After this returns, the chunk's intermediates (logits_chunk,
+        // log_softmax, picked, weighted, etc.) are no longer reachable
+        // — they drop at end-of-iteration via Rust RAII.
+        chunk_scaled.backward_into(grads, None)?;
+
+        total_loss_for_log = Some(match total_loss_for_log {
+            Some(t) => (t + chunk_log)?,
+            None => chunk_log,
+        });
+        start += this;
+    }
+
+    // Result: detached scalar (no autograd) representing the total loss.
+    // Caller uses it only for logging / loss-tracking; backward already
+    // happened above, gradients are already in `grads`.
+    total_loss_for_log
+        .map(|t| t.detach())
+        .ok_or_else(|| candle::Error::Msg("empty chunk loop".into()))
 }
 
 /// Non-tiled masked cross-entropy — matches the ORIGINAL masked_cross_entropy
