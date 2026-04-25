@@ -41,6 +41,7 @@ use candle::{Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use clap::Parser;
+use minijinja::{context, Environment};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -51,6 +52,87 @@ use tokio::sync::Mutex;
 use lora::LoRAConfig;
 use qwen2_lora::TargetModule;
 use qwen2_lora_quantized::Model;
+
+/// HF tokenizer_config.json shape — only the chat_template field is read.
+/// Some configs ship `chat_template` as a string; others as an array of
+/// `{name, template}` dicts. We pick the default (no `name`) entry when
+/// it's an array, falling back to the first entry.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ChatTemplateField {
+    Single(String),
+    Multi(Vec<ChatTemplateEntry>),
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatTemplateEntry {
+    #[serde(default)]
+    name: Option<String>,
+    template: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenizerConfig {
+    #[serde(default)]
+    chat_template: Option<ChatTemplateField>,
+}
+
+impl TokenizerConfig {
+    fn extract_template(self) -> Option<String> {
+        match self.chat_template? {
+            ChatTemplateField::Single(s) => Some(s),
+            ChatTemplateField::Multi(entries) => {
+                // Prefer the entry named "default" if present, else first.
+                entries
+                    .iter()
+                    .find(|e| e.name.as_deref() == Some("default"))
+                    .map(|e| e.template.clone())
+                    .or_else(|| entries.into_iter().next().map(|e| e.template))
+            }
+        }
+    }
+}
+
+/// Compiled chat template — a minijinja Environment holding the rendered
+/// template. Cheap to clone (Arc inside).
+struct ChatTemplate {
+    env: Environment<'static>,
+    template_name: &'static str,
+}
+
+impl ChatTemplate {
+    fn from_string(template: String) -> Result<Self> {
+        let mut env = Environment::new();
+        // Add the `tojson` filter HF templates expect for tool definitions.
+        // minijinja ships it under a different name; alias for compatibility.
+        env.add_template_owned("chat", template)
+            .context("compile chat_template")?;
+        Ok(Self {
+            env,
+            template_name: "chat",
+        })
+    }
+
+    fn render(&self, messages: &[ChatMessage], add_generation_prompt: bool) -> Result<String> {
+        let tmpl = self
+            .env
+            .get_template(self.template_name)
+            .context("template not found")?;
+        let rendered = tmpl
+            .render(context! {
+                messages => messages,
+                add_generation_prompt => add_generation_prompt,
+            })
+            .context("render chat template")?;
+        Ok(rendered)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
 
 /// PEFT adapter_config.json shape — strict subset of what we read.
 #[derive(Debug, Deserialize)]
@@ -144,6 +226,17 @@ struct Args {
     /// Force CPU. By default uses CUDA device 0.
     #[arg(long)]
     cpu: bool,
+
+    /// Path to the tokenizer_config.json (HuggingFace-format) that contains
+    /// the model's `chat_template` Jinja string. When set, the HTTP API
+    /// accepts `messages: [{role, content}, ...]` and renders them through
+    /// the chat template before generation. Without this flag, only raw
+    /// `prompt: "..."` requests are supported.
+    ///
+    /// Auto-discovered as `<tokenizer_path>/../tokenizer_config.json` when
+    /// --tokenizer points at a directory; specify explicitly otherwise.
+    #[arg(long)]
+    tokenizer_config: Option<PathBuf>,
 }
 
 /// Canonicalize and validate an operator-supplied path. The adapter path
@@ -240,6 +333,7 @@ struct Engine {
     tokenizer: Tokenizer,
     device: Device,
     eos_token_id: u32,
+    chat_template: Option<ChatTemplate>,
 }
 
 impl Engine {
@@ -258,6 +352,36 @@ impl Engine {
             .token_to_id("<|im_end|>")
             .or_else(|| tokenizer.token_to_id("</s>"))
             .unwrap_or(151643);
+
+        // Chat template — auto-discover from `<tokenizer_dir>/tokenizer_config.json`
+        // if not specified, matching how HF transformers loads it.
+        let tc_path: Option<PathBuf> = args.tokenizer_config.clone().or_else(|| {
+            args.tokenizer
+                .parent()
+                .map(|p| p.join("tokenizer_config.json"))
+                .filter(|p| p.exists())
+        });
+        let chat_template = if let Some(p) = tc_path {
+            let p = canonical_existing(&p)?;
+            eprintln!("loading tokenizer_config: {}", p.display());
+            let cfg_str = std::fs::read_to_string(&p) // nosemgrep
+                .with_context(|| format!("read {p:?}"))?;
+            let cfg: TokenizerConfig =
+                serde_json::from_str(&cfg_str).with_context(|| format!("parse {p:?}"))?;
+            match cfg.extract_template() {
+                Some(t) => {
+                    eprintln!("chat_template: loaded ({} chars)", t.len());
+                    Some(ChatTemplate::from_string(t)?)
+                }
+                None => {
+                    eprintln!("chat_template: NONE (config exists but no template field)");
+                    None
+                }
+            }
+        } else {
+            eprintln!("chat_template: NONE (no tokenizer_config.json found)");
+            None
+        };
 
         // Resolve the adapter ONCE upfront so we have one canonicalized
         // weights_path to thread through. Both the LoRA shell construction
@@ -340,6 +464,7 @@ impl Engine {
             tokenizer,
             device,
             eos_token_id,
+            chat_template,
         })
     }
 
@@ -405,6 +530,29 @@ impl Engine {
             .map_err(|e| anyhow::anyhow!("decode: {e}"))?;
         Ok(text)
     }
+
+    /// Render a chat-message array through the loaded chat_template, then
+    /// hand off to `generate()`. Errors clearly if no chat_template was
+    /// loaded at startup.
+    fn chat(
+        &mut self,
+        messages: &[ChatMessage],
+        max_tokens: usize,
+        temperature: f64,
+        top_p: Option<f64>,
+        seed: u64,
+    ) -> Result<String> {
+        let tmpl = self
+            .chat_template
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!(
+                "chat endpoint requires --tokenizer-config (or auto-discovery via \
+                 a tokenizer_config.json next to --tokenizer); start the server \
+                 with that flag, or use the /generate endpoint with a raw prompt"
+            ))?;
+        let prompt = tmpl.render(messages, true)?;
+        self.generate(&prompt, max_tokens, temperature, top_p, seed)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -466,6 +614,42 @@ async fn generate_handler(
     }
 }
 
+/// `/chat` request shape: messages array (role + content), plus the same
+/// sampling overrides as `/generate`. The chat_template is applied by
+/// the server before generation.
+#[derive(Debug, Deserialize)]
+struct ChatRequest {
+    messages: Vec<ChatMessage>,
+    #[serde(default)]
+    max_tokens: Option<usize>,
+    #[serde(default)]
+    temperature: Option<f64>,
+    #[serde(default)]
+    top_p: Option<f64>,
+    #[serde(default)]
+    seed: Option<u64>,
+}
+
+async fn chat_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ChatRequest>,
+) -> Result<Json<GenerateResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
+    let max_tokens = req.max_tokens.unwrap_or(state.defaults.max_tokens);
+    let temperature = req.temperature.unwrap_or(state.defaults.temperature);
+    let top_p = req.top_p.or(state.defaults.top_p);
+    let seed = req.seed.unwrap_or(state.defaults.seed);
+    let mut engine = state.engine.lock().await;
+    match engine.chat(&req.messages, max_tokens, temperature, top_p, seed) {
+        Ok(text) => Ok(Json(GenerateResponse { text })),
+        Err(e) => Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("{e:#}"),
+            }),
+        )),
+    }
+}
+
 async fn health() -> &'static str {
     "ok"
 }
@@ -502,6 +686,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/generate", post(generate_handler))
+        .route("/chat", post(chat_handler))
         .route("/health", axum::routing::get(health))
         .with_state(state);
 

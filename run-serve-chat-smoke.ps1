@@ -1,0 +1,9 @@
+Set-Location J:\candle-src
+& .\target\release\examples\qwen-lora-serve.exe `
+    --gguf 'J:\matt-voice\models\matt-voice-1.5b-q4_0.gguf' `
+    --tokenizer 'C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306\tokenizer.json' `
+    --tokenizer-config 'C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306\tokenizer_config.json' `
+    --prompt 'verify chat template loaded' `
+    --max-tokens 4 `
+    --temperature 0 `
+    --cpu 2>&1 | Tee-Object -FilePath J:\candle-src\logs\serve-chat-smoke.log
