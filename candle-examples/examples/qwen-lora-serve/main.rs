@@ -35,19 +35,27 @@ mod qwen2_lora;
 mod qwen2_lora_quantized;
 
 use anyhow::{Context, Result};
-use axum::{extract::State, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    response::sse::{Event, KeepAlive, Sse},
+    routing::post,
+    Json, Router,
+};
 use candle::quantized::gguf_file;
 use candle::{Device, Tensor};
 use candle_nn::{VarBuilder, VarMap};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use clap::Parser;
+use futures::stream::Stream;
 use minijinja::{context, Environment};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
+use tokio_stream::wrappers::ReceiverStream;
 
 use lora::LoRAConfig;
 use qwen2_lora::TargetModule;
@@ -543,6 +551,103 @@ impl Engine {
         Ok(text)
     }
 
+    /// Streaming variant of `generate`: pushes each newly-decoded token's
+    /// text fragment into `tx` as it's produced. Drops out cleanly if the
+    /// receiver is dropped (e.g. client disconnects). Returns the full
+    /// concatenated output string for logging.
+    ///
+    /// Per-token decode: we maintain a running `decoded_so_far` string and
+    /// re-decode the full token list each iteration; the delta is the new
+    /// text. This is the standard pattern — naively decoding only the
+    /// last token can produce broken output for multi-byte tokens or
+    /// merged BPE sequences.
+    fn generate_streaming(
+        &mut self,
+        prompt: &str,
+        max_tokens: usize,
+        temperature: f64,
+        top_p: Option<f64>,
+        seed: u64,
+        tx: &std::sync::mpsc::Sender<String>,
+    ) -> Result<String> {
+        self.model.clear_kv_cache();
+
+        let enc = self
+            .tokenizer
+            .encode(prompt, true)
+            .map_err(|e| anyhow::anyhow!("encode: {e}"))?;
+        let prompt_ids: Vec<u32> = enc.get_ids().to_vec();
+
+        let sampling = if temperature <= 0.0 {
+            Sampling::ArgMax
+        } else {
+            match top_p {
+                Some(p) => Sampling::TopP { p, temperature },
+                None => Sampling::All { temperature },
+            }
+        };
+        let mut logits_proc = LogitsProcessor::from_sampling(seed, sampling);
+
+        let prompt_tensor = Tensor::new(prompt_ids.as_slice(), &self.device)?
+            .unsqueeze(0)?;
+        let mut logits = self.model.forward(&prompt_tensor, 0)?;
+        let mut next_token = logits_proc.sample(&logits.squeeze(0)?)?;
+        let mut produced: Vec<u32> = vec![next_token];
+
+        // Decode the first token and emit. After this, we incrementally
+        // decode and emit the delta.
+        let mut decoded_so_far = self
+            .tokenizer
+            .decode(&produced, true)
+            .map_err(|e| anyhow::anyhow!("decode: {e}"))?;
+        if !decoded_so_far.is_empty() {
+            // Best-effort send; ignore errors (client may have disconnected).
+            let _ = tx.send(decoded_so_far.clone());
+        }
+
+        let mut index_pos = prompt_ids.len();
+        for _ in 1..max_tokens {
+            if next_token == self.eos_token_id {
+                break;
+            }
+            let inp = Tensor::new(&[next_token], &self.device)?.unsqueeze(0)?;
+            logits = self.model.forward(&inp, index_pos)?;
+            next_token = logits_proc.sample(&logits.squeeze(0)?)?;
+            produced.push(next_token);
+            index_pos += 1;
+
+            let new_full = self
+                .tokenizer
+                .decode(&produced, true)
+                .map_err(|e| anyhow::anyhow!("decode: {e}"))?;
+            // Emit the delta. The tokenizer occasionally rewrites earlier
+            // text (e.g. merging BPE pieces) so we can't strictly assume
+            // monotonic prefix-extension; treat the delta as everything
+            // beyond the currently-emitted prefix length.
+            if new_full.len() > decoded_so_far.len() {
+                let delta = new_full[decoded_so_far.len()..].to_string();
+                if tx.send(delta).is_err() {
+                    // Receiver dropped (client disconnected). Stop early.
+                    decoded_so_far = new_full;
+                    break;
+                }
+            }
+            decoded_so_far = new_full;
+        }
+
+        // Strip trailing EOS for the returned full string (clients that
+        // care about the EOS token can detect the [DONE] sentinel).
+        if produced.last() == Some(&self.eos_token_id) {
+            produced.pop();
+            // Re-decode the final clean string for the return value.
+            decoded_so_far = self
+                .tokenizer
+                .decode(&produced, true)
+                .map_err(|e| anyhow::anyhow!("decode: {e}"))?;
+        }
+        Ok(decoded_so_far)
+    }
+
     /// Render a chat-message array through the loaded chat_template, then
     /// hand off to `generate()`. Errors clearly if no chat_template was
     /// loaded at startup.
@@ -564,6 +669,27 @@ impl Engine {
             ))?;
         let prompt = tmpl.render(messages, true)?;
         self.generate(&prompt, max_tokens, temperature, top_p, seed)
+    }
+
+    /// Streaming variant of `chat`. Renders the chat template then calls
+    /// `generate_streaming`.
+    fn chat_streaming(
+        &mut self,
+        messages: &[ChatMessage],
+        max_tokens: usize,
+        temperature: f64,
+        top_p: Option<f64>,
+        seed: u64,
+        tx: &std::sync::mpsc::Sender<String>,
+    ) -> Result<String> {
+        let tmpl = self
+            .chat_template
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!(
+                "chat/stream endpoint requires --tokenizer-config"
+            ))?;
+        let prompt = tmpl.render(messages, true)?;
+        self.generate_streaming(&prompt, max_tokens, temperature, top_p, seed, tx)
     }
 }
 
@@ -662,6 +788,86 @@ async fn chat_handler(
     }
 }
 
+/// Build an SSE stream that runs the supplied generation closure on a
+/// blocking thread and forwards each token-text-delta as a `data: ...`
+/// event to the client. Sends a final `data: [DONE]` sentinel on success
+/// (matching the OpenAI streaming convention) or `data: [ERROR] {msg}`
+/// on failure. Drops cleanly if the client disconnects (the closure's
+/// `tx.send` will start failing and it'll exit early).
+fn sse_from_blocking_gen<F>(
+    state: AppState,
+    work: F,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>>
+where
+    F: FnOnce(&mut Engine, &std::sync::mpsc::Sender<String>) -> Result<String> + Send + 'static,
+{
+    // Two channels: the std::sync one the synchronous Engine generation
+    // sends through, and the tokio one we expose to the SSE stream.
+    let (sync_tx, sync_rx) = std::sync::mpsc::channel::<String>();
+    let (async_tx, async_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    // Bridge thread: pulls from sync_rx, pushes to async_tx. Cheap; one
+    // tokio task per request and one bridge thread per request.
+    let bridge_async_tx = async_tx.clone();
+    std::thread::spawn(move || {
+        for chunk in sync_rx.iter() {
+            let evt = Event::default().data(chunk);
+            if bridge_async_tx.blocking_send(Ok(evt)).is_err() {
+                // SSE stream dropped — stop bridging.
+                break;
+            }
+        }
+    });
+
+    // Worker thread: locks the engine and runs the generation, pushing
+    // through sync_tx. When done, sends [DONE] (or [ERROR]) via async_tx.
+    let async_tx_done = async_tx.clone();
+    tokio::task::spawn_blocking(move || {
+        // tokio::sync::Mutex requires a runtime; we use blocking_lock
+        // since we're on a blocking thread.
+        let mut engine = state.engine.blocking_lock();
+        let result = work(&mut engine, &sync_tx);
+        drop(sync_tx); // close sync side so bridge thread exits
+
+        let final_event = match result {
+            Ok(_) => Event::default().data("[DONE]"),
+            Err(e) => Event::default().data(format!("[ERROR] {e:#}")),
+        };
+        // Best-effort; ignore if client is gone.
+        let _ = async_tx_done.blocking_send(Ok(final_event));
+    });
+
+    Sse::new(ReceiverStream::new(async_rx)).keep_alive(KeepAlive::default())
+}
+
+async fn generate_stream_handler(
+    State(state): State<AppState>,
+    Json(req): Json<GenerateRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let max_tokens = req.max_tokens.unwrap_or(state.defaults.max_tokens);
+    let temperature = req.temperature.unwrap_or(state.defaults.temperature);
+    let top_p = req.top_p.or(state.defaults.top_p);
+    let seed = req.seed.unwrap_or(state.defaults.seed);
+    let prompt = req.prompt.clone();
+    sse_from_blocking_gen(state, move |engine, tx| {
+        engine.generate_streaming(&prompt, max_tokens, temperature, top_p, seed, tx)
+    })
+}
+
+async fn chat_stream_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ChatRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let max_tokens = req.max_tokens.unwrap_or(state.defaults.max_tokens);
+    let temperature = req.temperature.unwrap_or(state.defaults.temperature);
+    let top_p = req.top_p.or(state.defaults.top_p);
+    let seed = req.seed.unwrap_or(state.defaults.seed);
+    let messages = req.messages.clone();
+    sse_from_blocking_gen(state, move |engine, tx| {
+        engine.chat_streaming(&messages, max_tokens, temperature, top_p, seed, tx)
+    })
+}
+
 async fn health() -> &'static str {
     "ok"
 }
@@ -698,7 +904,9 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/generate", post(generate_handler))
+        .route("/generate/stream", post(generate_stream_handler))
         .route("/chat", post(chat_handler))
+        .route("/chat/stream", post(chat_stream_handler))
         .route("/health", axum::routing::get(health))
         .with_state(state);
 
