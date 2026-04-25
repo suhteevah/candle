@@ -199,6 +199,12 @@ struct Args {
     #[arg(long)]
     merge_adapters: bool,
 
+    /// Stack q/k/v base weights into a single matmul per attention layer.
+    /// ~5-10% decode speedup. Requires `--prequantize-base`. Compatible
+    /// with `--merge-adapters` (which also implies prequantize_base).
+    #[arg(long)]
+    fuse_qkv: bool,
+
     /// CLI mode: generate one response for this prompt, print, exit.
     #[arg(long)]
     prompt: Option<String>,
@@ -431,11 +437,17 @@ impl Engine {
             .with_context(|| format!("parse {gguf_path:?}"))?;
         // Merging implies pre-dequant: the merged weight is f16, can't go
         // back to Q4_K_M cleanly, so we might as well start with f16.
-        let prequantize_base = args.prequantize_base || args.merge_adapters;
+        // Fused QKV requires prequantize_base too (stacking quantized
+        // weights doesn't make sense).
+        let prequantize_base = args.prequantize_base || args.merge_adapters || args.fuse_qkv;
         let mut model = Model::from_gguf(
-            ct, &mut f, &targets, &lora_cfg, vb_lora, &device, prequantize_base,
+            ct, &mut f, &targets, &lora_cfg, vb_lora, &device,
+            prequantize_base, args.fuse_qkv,
         )?;
-        eprintln!("model loaded (prequantize_base={prequantize_base})");
+        eprintln!(
+            "model loaded (prequantize_base={prequantize_base}, fuse_qkv={})",
+            args.fuse_qkv
+        );
 
         // Pull trained adapter weights into the VarMap. The path was
         // canonicalized + existence-checked in resolve_adapter above.

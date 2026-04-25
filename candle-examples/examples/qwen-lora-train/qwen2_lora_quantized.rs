@@ -73,6 +73,33 @@ impl QLoRAProjection {
         Ok(y)
     }
 
+    /// Returns the base weight as an f16 Tensor when the base is stored
+    /// as `QMatMul::TensorF16` (prequantize_base path). Returns None if
+    /// the base is still a quantized QTensor — caller must dequantize
+    /// first or take a different path.
+    fn base_f16_weight(&self) -> Option<Tensor> {
+        match &self.base {
+            QMatMul::TensorF16(t) => Some(t.clone()),
+            _ => None,
+        }
+    }
+
+    /// Variant of `forward` for the fused-QKV path: skips the base matmul
+    /// (caller already computed it from a stacked weight), adds bias and
+    /// adapter delta on top of the supplied `base_out`. The adapter still
+    /// needs the original `xs` for its forward, so we pass it explicitly.
+    fn forward_post_base(&self, base_out: Tensor, xs: &Tensor, training: bool) -> Result<Tensor> {
+        let mut y = base_out;
+        if let Some(b) = &self.bias {
+            y = y.broadcast_add(b)?;
+        }
+        if let Some(a) = &self.adapter {
+            let delta = a.forward_delta(xs, training)?;
+            y = y.broadcast_add(&delta)?;
+        }
+        Ok(y)
+    }
+
     /// Fold the LoRA adapter (if any) into the base weight. After merge,
     /// `forward` skips the adapter compute entirely — the base alone
     /// produces the same output. Used at inference deployment time.
@@ -144,6 +171,14 @@ struct QLoRAAttention {
     k: QLoRAProjection,
     v: QLoRAProjection,
     o: QLoRAProjection,
+    /// Optional fused-QKV base weight, shape `(n_head*head_dim + 2*n_kv_head*head_dim, hidden)`.
+    /// When present, the attention forward computes Q/K/V via a single matmul
+    /// against this stacked weight instead of three independent matmuls
+    /// against `q.base`, `k.base`, `v.base`. Bias and adapter delta are still
+    /// applied per-projection via `forward_post_base`. Built only when both
+    /// `--prequantize-base` and `--fuse-qkv` are set, since stacking quantized
+    /// weights doesn't make sense (each is independently block-quantized).
+    qkv_fused: Option<QMatMul>,
     n_head: usize,
     n_kv_head: usize,
     head_dim: usize,
@@ -163,9 +198,29 @@ impl QLoRAAttention {
         training: bool,
     ) -> Result<Tensor> {
         let (b_sz, seq_len, _n_embd) = xs.dims3()?;
-        let q = self.q.forward(xs, training)?;
-        let k = self.k.forward(xs, training)?;
-        let v = self.v.forward(xs, training)?;
+        // Fused QKV: when a stacked weight is present, compute the Q+K+V
+        // base outputs via a single matmul, then split. Bias + LoRA adapter
+        // delta are still applied per-projection via `forward_post_base`.
+        // Otherwise fall through to the three independent forwards.
+        let (q, k, v) = if let Some(qkv_w) = &self.qkv_fused {
+            let q_dim = self.n_head * self.head_dim;
+            let kv_dim = self.n_kv_head * self.head_dim;
+            let qkv = qkv_w.forward(xs)?; // [B, L, q_dim + 2*kv_dim]
+            let q_out = qkv.narrow(D::Minus1, 0, q_dim)?;
+            let k_out = qkv.narrow(D::Minus1, q_dim, kv_dim)?;
+            let v_out = qkv.narrow(D::Minus1, q_dim + kv_dim, kv_dim)?;
+            (
+                self.q.forward_post_base(q_out, xs, training)?,
+                self.k.forward_post_base(k_out, xs, training)?,
+                self.v.forward_post_base(v_out, xs, training)?,
+            )
+        } else {
+            (
+                self.q.forward(xs, training)?,
+                self.k.forward(xs, training)?,
+                self.v.forward(xs, training)?,
+            )
+        };
 
         let q = q
             .reshape((b_sz, seq_len, self.n_head, self.head_dim))?
@@ -311,6 +366,12 @@ impl Model {
     /// f16 for Qwen2.5-7B). Recommended for >=16GB cards (P100 16GB,
     /// V100, A4000+, RTX 4090, etc.). Leave off for 8GB cards where the
     /// quantized base is required to fit at all.
+    ///
+    /// `fuse_qkv`: when true, stack the q/k/v base projection weights into
+    /// a single fused matmul per attention layer. 3 matmuls → 1, ~5-10%
+    /// attention speedup. Requires `prequantize_base=true` since stacking
+    /// quantized weights is meaningless (each block-quantized independently).
+    /// Bias and LoRA adapter deltas are still applied per-projection.
     pub fn from_gguf<R: std::io::Seek + std::io::Read>(
         ct: gguf_file::Content,
         reader: &mut R,
@@ -319,7 +380,13 @@ impl Model {
         vb_lora: VarBuilder,
         device: &Device,
         prequantize_base: bool,
+        fuse_qkv: bool,
     ) -> Result<Self> {
+        if fuse_qkv && !prequantize_base {
+            candle::bail!(
+                "fuse_qkv requires prequantize_base=true (cannot stack quantized weights)"
+            );
+        }
         // Helper: build a QMatMul from a raw QTensor, optionally pre-
         // dequantizing to f16. Centralizing this makes the prequantize
         // semantics impossible to forget for any individual weight.
@@ -430,11 +497,35 @@ impl Model {
                 lora_cfg,
                 vb_l.pp("o_proj"),
             )?;
+            // Build the fused QKV weight when --fuse-qkv is on. Requires
+            // prequantize_base (already enforced at function entry); we
+            // pull the f16 base tensors from each projection and stack
+            // them along the output (row) dim to form a single
+            // (q_out + k_out + v_out, hidden) weight that the attention
+            // forward dispatches against in one matmul instead of three.
+            let qkv_fused = if fuse_qkv {
+                let q_w = q.base_f16_weight().ok_or_else(|| {
+                    candle::Error::Msg("fuse_qkv: q.base is not TensorF16; \
+                        prequantize_base must produce f16 bases".into())
+                })?;
+                let k_w = k.base_f16_weight().ok_or_else(|| {
+                    candle::Error::Msg("fuse_qkv: k.base is not TensorF16".into())
+                })?;
+                let v_w = v.base_f16_weight().ok_or_else(|| {
+                    candle::Error::Msg("fuse_qkv: v.base is not TensorF16".into())
+                })?;
+                let stacked = Tensor::cat(&[&q_w, &k_w, &v_w], 0)?;
+                Some(QMatMul::TensorF16(stacked))
+            } else {
+                None
+            };
+
             let attn = QLoRAAttention {
                 q,
                 k,
                 v,
                 o,
+                qkv_fused,
                 n_head: head_count,
                 n_kv_head: head_count_kv,
                 head_dim,
@@ -637,6 +728,31 @@ impl Model {
             layer.mlp.gate.merge_adapter(&device)?;
             layer.mlp.up.merge_adapter(&device)?;
             layer.mlp.down.merge_adapter(&device)?;
+
+            // If this layer was using fused-QKV, the stacked weight was
+            // built from the un-merged q/k/v bases. After merge, the
+            // per-projection bases now include the adapter delta; the
+            // stacked weight would be stale. Rebuild it from the
+            // post-merge per-projection f16 weights.
+            if layer.attn.qkv_fused.is_some() {
+                let q_w = layer.attn.q.base_f16_weight().ok_or_else(|| {
+                    candle::Error::Msg(
+                        "merge+fuse_qkv: q.base is not TensorF16 after merge".into(),
+                    )
+                })?;
+                let k_w = layer.attn.k.base_f16_weight().ok_or_else(|| {
+                    candle::Error::Msg(
+                        "merge+fuse_qkv: k.base is not TensorF16 after merge".into(),
+                    )
+                })?;
+                let v_w = layer.attn.v.base_f16_weight().ok_or_else(|| {
+                    candle::Error::Msg(
+                        "merge+fuse_qkv: v.base is not TensorF16 after merge".into(),
+                    )
+                })?;
+                let stacked = Tensor::cat(&[&q_w, &k_w, &v_w], 0)?;
+                layer.attn.qkv_fused = Some(QMatMul::TensorF16(stacked));
+            }
         }
         Ok(())
     }

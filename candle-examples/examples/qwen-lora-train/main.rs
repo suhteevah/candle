@@ -115,6 +115,19 @@ struct Args {
     #[arg(long)]
     prequantize_base: bool,
 
+    /// Stack the q/k/v base projection weights into a single fused matmul
+    /// per attention layer. 3 matmuls → 1, ~5-10% attention speedup. The
+    /// LoRA adapter deltas + biases are still applied per-projection (we
+    /// don't fuse those, since the adapters are typically rank-8 and
+    /// merging them into a stacked weight would lose per-projection
+    /// gradient flow).
+    ///
+    /// REQUIRES `--prequantize-base` because stacking quantized weights
+    /// is meaningless — each block-quantized weight has its own scale
+    /// vector. Combining without dequant produces garbage.
+    #[arg(long)]
+    fuse_qkv: bool,
+
     /// Path to tokenizer.json. REQUIRED with `--gguf` (GGUFs don't embed
     /// an HF tokenizer). Ignored with `--base-dir` (auto-discovered).
     #[arg(long)]
@@ -370,6 +383,7 @@ fn main() -> Result<()> {
                 vb_lora,
                 &device,
                 args.prequantize_base,
+                args.fuse_qkv,
             )?;
         TrainModel::Quant(qm)
     } else {
