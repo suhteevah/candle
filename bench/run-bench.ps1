@@ -50,7 +50,8 @@ $presets = @{
 }
 
 if (-not $presets.ContainsKey($Preset)) {
-    Write-Error "Unknown preset '$Preset'. Known: $($presets.Keys -join ', ')"
+    $known = ($presets.Keys -join ', ')
+    Write-Error ('Unknown preset ' + $Preset + '. Known: ' + $known)
     exit 2
 }
 
@@ -59,7 +60,7 @@ $presetSpec = $presets[$Preset]
 # --- preflight: GPU + binary ---
 $bin = 'J:\candle-src\target\release\examples\qwen-lora-train.exe'
 if (-not (Test-Path $bin)) {
-    Write-Error "Binary missing at $bin — build first with build-lora-train-cuda.bat"
+    Write-Error ('Binary missing at ' + $bin + '; build first with build-lora-train-cuda.bat')
     exit 2
 }
 
@@ -68,9 +69,13 @@ $parts = $gpuLine -split ','
 $memUsed = [int]($parts[0].Trim())
 $memFree = [int]($parts[1].Trim())
 $util = [int]($parts[2].Trim())
-Write-Host "[preflight] GPU: ${memUsed}MB used / ${memFree}MB free / ${util}% util"
-if ($memUsed -gt 1000) {
-    Write-Error "GPU not idle (${memUsed} MB used). Aborting bench."
+Write-Host ('[preflight] GPU: ' + $memUsed + 'MB used / ' + $memFree + 'MB free / ' + $util + 'pct util')
+if ($memUsed -gt 1500) {
+    Write-Error ('GPU not idle: ' + $memUsed + 'MB used. Close GPU apps. Aborting.')
+    exit 3
+}
+if ($memFree -lt 6500) {
+    Write-Error ('Only ' + $memFree + 'MB free; need 6500+ for the bench. Aborting.')
     exit 3
 }
 
@@ -105,13 +110,27 @@ $args = @(
     '--seed',              '299792458'
 ) + $presetSpec.extra
 
-Write-Host "[bench] running: $bin $($args -join ' ')"
-& $bin @args 2>&1 | Tee-Object -FilePath $logFile
+# Build a quoted command line for cmd /c so stderr can be merged into
+# stdout via plain shell redirection — bypasses PowerShell's
+# $ErrorActionPreference='Stop' which treats any native-exe stderr line
+# as a terminating error and aborts the rest of the script.
+$quoted = @($bin) + ($args | ForEach-Object {
+    if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+})
+$cmdLine = ($quoted -join ' ')
+Write-Host ('[bench] running: ' + $cmdLine)
+
+# Allow stderr-as-info from the native exe; we'll judge success by
+# parsing the BENCH line from the captured log.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+cmd /c ($cmdLine + ' > "' + $logFile + '" 2>&1')
+$ErrorActionPreference = $prevEAP
 
 # --- parse BENCH line ---
 $benchLine = Get-Content $logFile | Where-Object { $_ -match '^BENCH ' } | Select-Object -Last 1
 if (-not $benchLine) {
-    Write-Error "No BENCH line in output ($logFile)"
+    Write-Error ('No BENCH line in output, log at ' + $logFile)
     exit 4
 }
 $benchJson = $benchLine -replace '^BENCH ', ''
@@ -132,5 +151,5 @@ $result = [PSCustomObject]@{
     log_file        = $logFile
 }
 $result | ConvertTo-Json | Out-File -FilePath $jsonFile -Encoding utf8 -NoNewline
-Write-Host "[bench] result: $($bench.tokens_per_sec) tok/s, $($bench.peak_vram_mb) MB peak, util $($bench.mean_gpu_util)%"
-Write-Host "[bench] wrote: $jsonFile"
+Write-Host ('[bench] result: ' + $bench.tokens_per_sec + ' tok/s, ' + $bench.peak_vram_mb + 'MB peak')
+Write-Host ('[bench] wrote: ' + $jsonFile)

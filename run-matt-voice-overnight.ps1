@@ -37,6 +37,15 @@ $args = @(
     '--log-every',         '10',
     '--save-every',        '100',
     '--gradient-checkpoint'
+    # WARNING: do NOT add --ce-chunk-size on 8GB. TDPI bench at
+    # commit 693a0ea proved it OOMs at seq=256/128 because chunked
+    # CE retains all 4 chunks' logits in the autograd graph
+    # simultaneously — opposite of the original "frees transient"
+    # claim. See bench/PERF_LOG.md entry F-cechunk32-s128.
+    #
+    # On cnc P100 16GB once cards are back in: --prequantize-base
+    # is the win to add (2-3× backward speedup, ~14GB persistent
+    # base VRAM, fits on 16GB).
 )
 
 $proc = Start-Process `
