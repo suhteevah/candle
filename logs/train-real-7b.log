@@ -1,0 +1,32 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base          : gguf:J:\matt-voice\models\qwen2.5-7b-q4km.gguf
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\matt-voice-7b-qlora-real
+  LoRA r/α/drop  : 8 / 16 / 0.05
+  target modules : q_proj,k_proj,v_proj,o_proj
+  batch×accum=eff: 1×4=4  lr=2.00e-4  max_steps=10
+  dataset        : 46407 pairs
+  mode           : QLoRA (quantized GGUF base)
+  gguf           : J:\matt-voice\models\qwen2.5-7b-q4km.gguf
+  model          : 28 layers, hidden=3584 heads=28 kv_heads=4 (quantized)
+  LoRA adapters  : 4 projection types × 28 layers = 112 total
+  trainable params: 5046272 (19.25 MB @ fp32)
+  prefetch       : off (inline)
+  ce chunk size  : 0
+
+=== training ===
+step     1/10     loss 9.2330  (micro-batches processed: 4/40)
+step     2/10     loss 10.9034  (micro-batches processed: 8/40)
+step     3/10     loss 9.2252  (micro-batches processed: 12/40)
+step     4/10     loss 8.2645  (micro-batches processed: 16/40)
+step     5/10     loss 5.9407  (micro-batches processed: 20/40)
+step     6/10     loss 4.2158  (micro-batches processed: 24/40)
+step     7/10     loss 3.2128  (micro-batches processed: 28/40)
+step     8/10     loss 4.6710  (micro-batches processed: 32/40)
+step     9/10     loss 3.2276  (micro-batches processed: 36/40)
+step    10/10     loss 5.5495  (micro-batches processed: 40/40)
+
+=== saving adapter ===
+adapter saved to J:\matt-voice\adapters\matt-voice-7b-qlora-real

@@ -1,0 +1,11 @@
+qwen-lora-serve.exe : device: Cpu
+At J:\candle-src\run-serve-smoke.ps1:2 char:1
++ & .\target\release\examples\qwen-lora-serve.exe `
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (device: Cpu:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+adapter: NONE (base GGUF only)
+loading GGUF: \\?\J:\matt-voice\models\matt-voice-1.5b-q4_0.gguf
+model loaded
+ doing today? �

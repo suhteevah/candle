@@ -1,0 +1,19 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base          : gguf:C:\Users\Matt\models\qwen2.5-3b-q4_k_m.gguf
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\matt-voice\adapters\qlora-3b-v3
+  LoRA r/α/drop  : 8 / 16 / 0.05
+  target modules : q_proj,v_proj
+  batch×accum=eff: 1×4=4  lr=2.00e-4  max_steps=500
+  dataset        : 46407 pairs
+  mode           : QLoRA (quantized GGUF base)
+  gguf           : C:\Users\Matt\models\qwen2.5-3b-q4_k_m.gguf
+  model          : 36 layers, hidden=2048 heads=16 kv_heads=2 (quantized)
+  LoRA adapters  : 2 projection types × 36 layers = 72 total
+  trainable params: 1843200 (7.03 MB @ fp32)
+  prefetch       : off (inline)
+  ce chunk size  : 0
+  mode           : BENCHMARK (3 warmup + 20 measured steps)
+Error: shape mismatch in matmul, lhs: [1, 79, 151936], rhs: [151936, 2048]

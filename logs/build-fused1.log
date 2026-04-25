@@ -1,0 +1,43 @@
+
+J:\claudeai>call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" 
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.0
+** Copyright (c) 2022 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+warning: candle-kernels@0.10.2: Using 8 threads for compilation
+warning: candle-kernels@0.10.2: Compiling 15 of 15 kernels
+   Compiling candle-examples v0.10.2 (J:\candle-src\candle-examples)
+warning: unused import: `Module`
+  --> candle-examples\examples\qwen-lora-train\xentropy.rs:39:21
+   |
+39 | use candle::{DType, Module, Result, Tensor, D};
+   |                     ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Model`
+  --> candle-examples\examples\qwen-lora-train\main.rs:40:40
+   |
+40 | use qwen2_lora::{parse_target_modules, Model};
+   |                                        ^^^^^
+
+error[E0599]: no method named `try_clone` found for reference `&candle_core::CudaStorage` in the current scope
+  --> candle-examples\examples\qwen-lora-train\fused_ops.rs:94:24
+   |
+94 |                 Ok((cu.try_clone(self.y.layout())?, layout.shape().clone()))
+   |                        ^^^^^^^^^
+   |
+   = help: items from traits can only be used if the trait is in scope
+help: there is a method `clone` with a similar name, but with different arguments
+  --> /rustc/01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\library\core\src\clone.rs:236:5
+help: trait `BackendStorage` which provides `try_clone` is implemented but not in scope; perhaps you want to import it
+   |
+29 + use candle_core::backend::BackendStorage;
+   |
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `candle-examples` (example "qwen-lora-train") generated 2 warnings
+error: could not compile `candle-examples` (example "qwen-lora-train") due to 1 previous error; 2 warnings emitted

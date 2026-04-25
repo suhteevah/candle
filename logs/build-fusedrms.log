@@ -163,4 +163,4 @@ warning: function `compute_masked_ce_sum` is never used
     |    ^^^^^^^^^^^^^^^^^^^^^
 
 warning: `candle-examples` (example "qwen-lora-train") generated 19 warnings (run `cargo fix --example "qwen-lora-train" -p candle-examples` to apply 4 suggestions)
-    Finished `release` profile [optimized] target(s) in 7.94s
+    Finished `release` profile [optimized] target(s) in 8.53s

@@ -10,30 +10,18 @@ operable program or batch file.
 warning: candle-kernels@0.10.2: Using 8 threads for compilation
 warning: candle-kernels@0.10.2: Compiling 15 of 15 kernels
    Compiling candle-examples v0.10.2 (J:\candle-src\candle-examples)
-warning: unused import: `D`
-  --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:25:62
-   |
-25 | use candle::{DType, Device, IndexOp, Module, Result, Tensor, D};
-   |                                                              ^
-   |
-   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-warning: unused import: `ops::rms_norm_slow`
-  --> candle-examples\examples\qwen-lora-train\qwen2_lora_quantized.rs:26:17
-   |
-26 | use candle_nn::{ops::rms_norm_slow, VarBuilder};
-   |                 ^^^^^^^^^^^^^^^^^^
-
 warning: unused import: `Module`
   --> candle-examples\examples\qwen-lora-train\xentropy.rs:39:21
    |
 39 | use candle::{DType, Module, Result, Tensor, D};
    |                     ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused import: `Model`
-  --> candle-examples\examples\qwen-lora-train\main.rs:40:40
+  --> candle-examples\examples\qwen-lora-train\main.rs:39:40
    |
-40 | use qwen2_lora::{parse_target_modules, Model};
+39 | use qwen2_lora::{parse_target_modules, Model};
    |                                        ^^^^^
 
 warning: fields `source` and `avg_logprob` are never read
@@ -73,36 +61,36 @@ warning: function `param_norms` is never used
     |        ^^^^^^^^^^^
 
 warning: method `clear_kv_cache` is never used
-   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:432:8
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:431:8
     |
 278 | impl Attention {
     | -------------- method in this implementation
 ...
-432 |     fn clear_kv_cache(&mut self) {
+431 |     fn clear_kv_cache(&mut self) {
     |        ^^^^^^^^^^^^^^
 
 warning: method `clear_kv_cache` is never used
-   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:504:8
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:503:8
     |
-445 | impl DecoderLayer {
+444 | impl DecoderLayer {
     | ----------------- method in this implementation
 ...
-504 |     fn clear_kv_cache(&mut self) {
+503 |     fn clear_kv_cache(&mut self) {
     |        ^^^^^^^^^^^^^^
 
 warning: method `clear_kv_cache` is never used
-   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:693:12
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:692:12
     |
-520 | impl Model {
+519 | impl Model {
     | ---------- method in this implementation
 ...
-693 |     pub fn clear_kv_cache(&mut self) {
+692 |     pub fn clear_kv_cache(&mut self) {
     |            ^^^^^^^^^^^^^^
 
 warning: function `last_token_logits` is never used
-   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:717:8
+   --> candle-examples\examples\qwen-lora-train\qwen2_lora.rs:716:8
     |
-717 | pub fn last_token_logits(logits: &Tensor) -> Result<Tensor> {
+716 | pub fn last_token_logits(logits: &Tensor) -> Result<Tensor> {
     |        ^^^^^^^^^^^^^^^^^
 
 warning: method `clear_kv_cache` is never used
@@ -162,5 +150,5 @@ warning: function `compute_masked_ce_sum` is never used
 135 | fn compute_masked_ce_sum(
     |    ^^^^^^^^^^^^^^^^^^^^^
 
-warning: `candle-examples` (example "qwen-lora-train") generated 19 warnings (run `cargo fix --example "qwen-lora-train" -p candle-examples` to apply 4 suggestions)
-    Finished `release` profile [optimized] target(s) in 7.94s
+warning: `candle-examples` (example "qwen-lora-train") generated 17 warnings (run `cargo fix --example "qwen-lora-train" -p candle-examples` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 8.07s
