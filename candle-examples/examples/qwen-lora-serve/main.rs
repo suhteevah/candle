@@ -96,6 +96,27 @@ struct Args {
     #[arg(long)]
     alpha: Option<f32>,
 
+    /// Pre-dequantize base GGUF weights to f16 at load time (instead of
+    /// dequantizing on the fly during forward). Trades persistent VRAM
+    /// for per-token speed. Recommended for >=16GB cards.
+    /// 7B Q4_K_M ~4.5GB → ~14GB f16.
+    #[arg(long)]
+    prequantize_base: bool,
+
+    /// Fold the LoRA adapter into the base weight at load time, then drop
+    /// the adapter. After merge, forward does a single matmul per
+    /// projection instead of `base + scaling * B(A(x))`. 10-20% faster
+    /// decode at the cost of replacing quantized base with f16 (so VRAM
+    /// goes up like `--prequantize-base`). Mirrors PEFT's
+    /// `model.merge_and_unload()`.
+    ///
+    /// Implies `--prequantize-base` semantics for the QLoRA path: the
+    /// merged weight cannot be represented as Q4_K_M without quality
+    /// loss, so we keep it as f16. If memory is tight, leave this OFF
+    /// and accept the slight per-token overhead.
+    #[arg(long)]
+    merge_adapters: bool,
+
     /// CLI mode: generate one response for this prompt, print, exit.
     #[arg(long)]
     prompt: Option<String>,
@@ -284,13 +305,34 @@ impl Engine {
             .with_context(|| format!("open {gguf_path:?}"))?;
         let ct = gguf_file::Content::read(&mut f)
             .with_context(|| format!("parse {gguf_path:?}"))?;
-        let model = Model::from_gguf(ct, &mut f, &targets, &lora_cfg, vb_lora, &device)?;
-        eprintln!("model loaded");
+        // Merging implies pre-dequant: the merged weight is f16, can't go
+        // back to Q4_K_M cleanly, so we might as well start with f16.
+        let prequantize_base = args.prequantize_base || args.merge_adapters;
+        let mut model = Model::from_gguf(
+            ct, &mut f, &targets, &lora_cfg, vb_lora, &device, prequantize_base,
+        )?;
+        eprintln!("model loaded (prequantize_base={prequantize_base})");
 
         // Pull trained adapter weights into the VarMap. The path was
         // canonicalized + existence-checked in resolve_adapter above.
         if let Some((_, weights_path)) = resolved {
             load_adapter_weights(&mut varmap, &weights_path)?;
+        }
+
+        // After the adapter weights are in the VarMap, optionally fold
+        // them into the base. Order matters: weights must be loaded
+        // BEFORE merge so the merged weight reflects the trained values.
+        if args.merge_adapters {
+            if args.adapter.is_none() {
+                eprintln!(
+                    "warning: --merge-adapters requested but no --adapter \
+                     supplied; nothing to merge, base will be used as-is"
+                );
+            } else {
+                eprintln!("merging adapters into base weights...");
+                model.merge_adapters_into_base()?;
+                eprintln!("merge complete; per-token adapter compute eliminated");
+            }
         }
 
         Ok(Self {

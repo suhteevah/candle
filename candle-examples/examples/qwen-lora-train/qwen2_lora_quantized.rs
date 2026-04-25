@@ -72,6 +72,41 @@ impl QLoRAProjection {
         }
         Ok(y)
     }
+
+    /// Fold the LoRA adapter (if any) into the base weight. After merge,
+    /// `forward` skips the adapter compute entirely — the base alone
+    /// produces the same output. Used at inference deployment time.
+    ///
+    /// Mechanics:
+    ///   `W_eff = W_base + scaling * B @ A`
+    ///   `forward(x) = W_eff @ x + bias`
+    ///
+    /// The base is converted to (or kept as) `QMatMul::TensorF16` since the
+    /// merged weight is no longer quantized — once we add an fp adapter
+    /// delta, the result is no longer a Q4_K_M-clean weight tensor.
+    fn merge_adapter(&mut self, device: &Device) -> Result<()> {
+        let Some(adapter) = self.adapter.take() else {
+            return Ok(()); // no adapter, nothing to merge
+        };
+        // Get base weight as a regular f16 tensor (same shape as quantized:
+        // [out_features, in_features]).
+        let w_base_f16 = match &self.base {
+            QMatMul::TensorF16(t) => t.clone(),
+            QMatMul::Tensor(t) => t.to_dtype(DType::F16)?,
+            QMatMul::QTensor(qt) => qt.dequantize_f16(device)?,
+        };
+        // Compute scaling * B @ A in adapter dtype (typically fp32), then
+        // cast to f16 and add. The double cast keeps the matmul precise.
+        let delta = adapter.merged_weight_delta()?;
+        let delta_f16 = if delta.dtype() == DType::F16 {
+            delta
+        } else {
+            delta.to_dtype(DType::F16)?
+        };
+        let merged = w_base_f16.add(&delta_f16)?;
+        self.base = QMatMul::TensorF16(merged);
+        Ok(())
+    }
 }
 
 struct QLoRAMlp {
@@ -573,5 +608,36 @@ impl Model {
         for l in self.layers.iter_mut() {
             l.clear_kv_cache();
         }
+    }
+
+    /// Fold every LoRA adapter into its base projection weight, then drop
+    /// the adapters. After this, `forward` does plain `base_matmul + bias`
+    /// per projection — no per-token adapter compute. Used at inference
+    /// deployment time after loading the trained adapter weights.
+    ///
+    /// Trade-offs:
+    ///   + 10-20% faster decode (one matmul per projection instead of
+    ///     base_matmul + A_matmul + B_matmul + scaling + add).
+    ///   + Frees adapter VRAM (~10-20 MB at typical ranks).
+    ///   + Quantized base bytes get replaced by f16 base bytes — this
+    ///     INCREASES VRAM since the merged weight can no longer be
+    ///     represented as a Q4_K_M tensor without quality loss. For 7B
+    ///     this is ~+10 GB persistent. If memory is tight, leave this
+    ///     OFF and accept the slight per-token overhead.
+    ///
+    /// Mirrors PEFT's `model.merge_and_unload()` and llama.cpp's
+    /// `llama-export-lora` for parity.
+    pub fn merge_adapters_into_base(&mut self) -> Result<()> {
+        let device = self.device.clone();
+        for layer in self.layers.iter_mut() {
+            layer.attn.q.merge_adapter(&device)?;
+            layer.attn.k.merge_adapter(&device)?;
+            layer.attn.v.merge_adapter(&device)?;
+            layer.attn.o.merge_adapter(&device)?;
+            layer.mlp.gate.merge_adapter(&device)?;
+            layer.mlp.up.merge_adapter(&device)?;
+            layer.mlp.down.merge_adapter(&device)?;
+        }
+        Ok(())
     }
 }

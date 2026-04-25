@@ -85,6 +85,23 @@ impl LoRALinear {
         })
     }
 
+    /// Returns the merged-into-base weight delta: `scaling * B @ A`. Adding
+    /// this to the base projection's `(out, in)` weight tensor produces a
+    /// merged base that, when used by itself, gives the same output as
+    /// `base @ x + scaling * B(A(x))`. Used at inference deployment time
+    /// to flatten LoRA adapters into the base — eliminates per-token
+    /// adapter compute and frees adapter VRAM.
+    ///
+    /// The returned tensor is in the dtype of `B` (typically fp32 during
+    /// training; callers should `to_dtype` to match the base they're
+    /// merging into, usually f16).
+    pub fn merged_weight_delta(&self) -> Result<Tensor> {
+        let a_w = self.a.weight();          // (rank, in)
+        let b_w = self.b.weight();          // (out, rank)
+        let ba = b_w.matmul(a_w)?;          // (out, in)
+        ba.affine(self.scaling, 0.0)
+    }
+
     /// Returns the additive LoRA delta to add to the base projection output.
     /// `training=true` applies dropout; `false` skips it (for eval).
     pub fn forward_delta(&self, x: &Tensor, training: bool) -> Result<Tensor> {
