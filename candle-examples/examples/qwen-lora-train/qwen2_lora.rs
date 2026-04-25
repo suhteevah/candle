@@ -40,7 +40,7 @@ impl DiffRmsNorm {
 
 impl Module for DiffRmsNorm {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
-        candle_nn::ops::rms_norm_slow(xs, &self.weight, self.eps as f32)
+        crate::fused_ops::fused_rms_norm(xs, &self.weight, self.eps as f32)
     }
 }
 

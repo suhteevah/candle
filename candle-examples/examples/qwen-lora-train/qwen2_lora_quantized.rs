@@ -100,7 +100,7 @@ impl DiffRmsNorm {
         Ok(Self { weight, eps })
     }
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
-        rms_norm_slow(xs, &self.weight, self.eps)
+        crate::fused_ops::fused_rms_norm(xs, &self.weight, self.eps)
     }
 }
 
