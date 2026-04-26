@@ -255,6 +255,17 @@ struct Args {
     #[arg(long)]
     fuse_qkv: bool,
 
+    /// Enable TF32 GEMMs on Ampere+. ~5-15% inference speedup for f32
+    /// paths (LoRA adapters, fp32 lm_head). No effect on pre-Ampere.
+    #[arg(long)]
+    tf32: bool,
+
+    /// Enable fp16-accumulating f16 GEMMs. Higher quality risk than
+    /// TF32; useful for inference where prompt-length reductions are
+    /// short. Default OFF.
+    #[arg(long)]
+    reduced_precision_f16: bool,
+
     /// Benchmark-decode mode. When set, generate exactly N tokens (no
     /// EOS-early-stop) using `--prompt`, then print a single-line JSON:
     ///   `BENCH_INFER {"decode_tok_per_sec":...,"first_token_ms":...,"total_ms":...,"peak_vram_mb":...}`
@@ -1007,6 +1018,20 @@ async fn health() -> &'static str {
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Apply CUDA precision-mode flags BEFORE loading the model so the
+    // first cuBLAS dispatch picks them up. No-op on Pascal/CPU.
+    #[cfg(feature = "cuda")]
+    {
+        if args.tf32 {
+            candle::cuda_backend::set_gemm_reduced_precision_f32(true);
+            eprintln!("tf32: ENABLED");
+        }
+        if args.reduced_precision_f16 {
+            candle::cuda_backend::set_gemm_reduced_precision_f16(true);
+            eprintln!("f16-reduce: ENABLED");
+        }
+    }
 
     let mut engine = Engine::load(&args)?;
 

@@ -1,0 +1,19 @@
+qwen-lora-train v1 (fp16 base + fp32 adapters)
+  device         : Cuda(CudaDevice(DeviceId(1)))
+  dtype (base)   : BF16
+  base          : gguf:J:\matt-voice\models\qwen2.5-7b-q4km.gguf
+  dataset        : J:\matt-voice\training-data\matt-voice.jsonl
+  output dir     : J:\tmp\bench-noop
+  LoRA r/α/drop  : 8 / 16 / 0.05
+  target modules : q_proj,v_proj
+  batch×accum=eff: 1×4=4  lr=2.00e-4  max_steps=500
+  dataset        : 46407 pairs
+  mode           : QLoRA (quantized GGUF base)
+  gguf           : J:\matt-voice\models\qwen2.5-7b-q4km.gguf
+  model          : 28 layers, hidden=3584 heads=28 kv_heads=4 (quantized)
+  LoRA adapters  : 2 projection types × 28 layers = 56 total
+  trainable params: 2523136 (9.62 MB @ fp32)
+  prefetch       : off (inline)
+  ce chunk size  : 0
+  mode           : BENCHMARK (3 warmup + 20 measured steps)
+BENCH {"tokens_per_sec":4.8,"step_ms_median":60804.37,"step_ms_p95":70093.18,"peak_vram_mb":7816,"mean_gpu_util":93.3,"cfg":"q4km-7b-r8-qv-s128-gc-loraf16"}

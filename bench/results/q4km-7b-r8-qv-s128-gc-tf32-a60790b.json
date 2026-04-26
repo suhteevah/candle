@@ -1,0 +1,14 @@
+﻿{
+    "commit":  "a60790b",
+    "branch":  "matt-voice-lora",
+    "preset":  "q4km-7b-r8-qv-s128-gc-tf32",
+    "host":  "KOKONOE",
+    "run_at":  "2026-04-25T17:31:44.6983515-07:00",
+    "tok_per_sec":  4.1,
+    "step_ms_median":  60951.17,
+    "step_ms_p95":  116734.19,
+    "peak_vram_mb":  7783,
+    "mean_gpu_util":  94.6,
+    "cfg_label":  "q4km-7b-r8-qv-s128-gc-tf32",
+    "log_file":  "J:\\candle-src\\bench\\results\\q4km-7b-r8-qv-s128-gc-tf32-a60790b-20260425-170446.log"
+}

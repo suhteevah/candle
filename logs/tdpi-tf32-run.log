@@ -1,0 +1,4 @@
+[preflight] GPU: 1322MB used / 6696MB free / 0pct util
+[bench] running: J:\candle-src\target\release\examples\qwen-lora-train.exe --gguf J:\matt-voice\models\qwen2.5-7b-q4km.gguf --tokenizer C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306\tokenizer.json --dataset J:\matt-voice\training-data\matt-voice.jsonl --output-dir J:\tmp\bench-noop --rank 8 --alpha 16 --target-modules q_proj,v_proj --batch-size 1 --grad-accum-steps 4 --max-seq-len 128 --gradient-checkpoint --benchmark --bench-label q4km-7b-r8-qv-s128-gc-tf32 --seed 299792458 --tf32
+[bench] result: 4.1 tok/s, 7783MB peak
+[bench] wrote: J:\candle-src\bench\results\q4km-7b-r8-qv-s128-gc-tf32-a60790b.json

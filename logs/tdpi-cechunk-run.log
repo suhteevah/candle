@@ -1,0 +1,27 @@
+At J:\candle-src\bench\run-bench.ps1:73 char:43
++     Write-Error "GPU not idle (${memUsed} MB used). Close GPU-using a ...
++                                           ~~
+Unexpected token 'MB' in expression or statement.
+At J:\candle-src\bench\run-bench.ps1:73 char:42
++     Write-Error "GPU not idle (${memUsed} MB used). Close GPU-using a ...
++                                          ~
+Missing closing ')' in expression.
+At J:\candle-src\bench\run-bench.ps1:61 char:28
++ if (-not (Test-Path $bin)) {
++                            ~
+Missing closing '}' in statement block or type definition.
+At J:\candle-src\bench\run-bench.ps1:73 char:50
++     Write-Error "GPU not idle (${memUsed} MB used). Close GPU-using a ...
++                                                  ~
+Unexpected token ')' in expression or statement.
+At J:\candle-src\bench\run-bench.ps1:142 char:14
++ Write-Host "[bench] result: $($bench.tokens_per_sec) tok/s, $($bench. ...
++              ~
+Array index expression is missing or not valid.
+At J:\candle-src\bench\run-bench.ps1:143 char:37
++ Write-Host "[bench] wrote: $jsonFile"
++                                     ~
+The string is missing the terminator: ".
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
+ 
