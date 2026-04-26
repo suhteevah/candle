@@ -128,6 +128,26 @@ struct Args {
     #[arg(long)]
     fuse_qkv: bool,
 
+    /// Enable TF32 (`CUBLAS_COMPUTE_32F_FAST_TF32`) for f32 GEMMs on
+    /// Ampere+ tensor cores. Trades a few mantissa bits (10-bit instead
+    /// of 23-bit) for ~5-15% speedup on matmuls that go through cuBLAS
+    /// in fp32 — primarily LoRA adapter A/B matmuls + the lm_head when
+    /// it's stored as fp32. Negligible quality impact for QLoRA training
+    /// in practice; matches the default behavior of PyTorch on Ampere.
+    /// No effect on Pascal (sm < 80) or pre-Volta cards. Default OFF
+    /// for explicit opt-in.
+    #[arg(long)]
+    tf32: bool,
+
+    /// Enable reduced-precision (fp16-accumulating) f16 GEMMs. This is
+    /// the fp16 cousin of `--tf32`: when the matmul inputs are fp16, the
+    /// GPU accumulates intermediate sums in fp16 instead of fp32. Larger
+    /// quality risk than TF32 — fp16 accumulation can NaN out at long
+    /// reductions on long sequences. Default OFF. Recommend leaving off
+    /// unless benchmark shows real gains AND loss curves stay stable.
+    #[arg(long)]
+    reduced_precision_f16: bool,
+
     /// Path to tokenizer.json. REQUIRED with `--gguf` (GGUFs don't embed
     /// an HF tokenizer). Ignored with `--base-dir` (auto-discovered).
     #[arg(long)]
@@ -262,6 +282,22 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Apply CUDA precision-mode flags before any device work happens —
+    // these are global atomics inside candle-core that gate every cuBLAS
+    // GEMM dispatch. TF32 only takes effect on sm >= 80 (Ampere+); the
+    // flag is a no-op on older cards.
+    #[cfg(feature = "cuda")]
+    {
+        if args.tf32 {
+            candle::cuda_backend::set_gemm_reduced_precision_f32(true);
+            eprintln!("  tf32           : ENABLED (CUBLAS_COMPUTE_32F_FAST_TF32 for f32 GEMMs)");
+        }
+        if args.reduced_precision_f16 {
+            candle::cuda_backend::set_gemm_reduced_precision_f16(true);
+            eprintln!("  f16-reduce     : ENABLED (fp16-accumulating f16 GEMMs)");
+        }
+    }
 
     let device = candle_examples::device(args.cpu)?;
     // bf16 on CUDA: same memory footprint as fp16, same range as fp32 — no

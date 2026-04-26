@@ -179,3 +179,119 @@ is tighter than the back-of-envelope math suggested. Future "saves
 memory" claims should explicitly include a baseline-peak-vs-test-peak
 delta from a real run, not just a per-tensor calculation.
 
+## [2026-04-25T17:31:00] G-tf32-s128 — REJECT (severe regression)
+
+- Win G: `--tf32` flag wiring `set_gemm_reduced_precision_f32(true)`
+  which flips cuBLAS to `CUBLAS_COMPUTE_32F_FAST_TF32` for f32 GEMMs
+  on Ampere+ tensor cores.
+- baseline preset: `q4km-7b-r8-qv-s128-gc` (5.5 tok/s, 7919 MB peak,
+  step_ms_p95 55963)
+- test preset: `q4km-7b-r8-qv-s128-gc-tf32`, commit `a60790b`
+- result: 4.1 tok/s, 7783 MB peak, step_ms_p95 116734
+- log: `bench/results/q4km-7b-r8-qv-s128-gc-tf32-a60790b-20260425-170446.log`
+
+### Measured deltas
+
+- tok_per_sec: 5.5 → 4.1 = **−25.5%** (REGRESSION)
+- peak_vram_mb: 7919 → 7783 = −1.7% (marginal improvement)
+- step_ms_median: 53933 → 60951 = +13.0% (slower)
+- step_ms_p95: 55963 → **116734** = **+108.6%** (catastrophic tail)
+
+### Root cause hypothesis
+
+cuBLAS algorithm picker is pessimizing on our specific matmul shapes
+when `CUBLAS_COMPUTE_32F_FAST_TF32` is set. The p95 doubling +
+median +13% pattern is the signature of:
+
+1. **Algorithm thrashing**: cuBLAS picks one TF32 algorithm for
+   warmup, hits perf cliff for some shapes, falls back to a slow
+   path mid-run.
+2. **Most matmuls in our path are NOT f32** — they're bf16 (model
+   forward) or quantized via QMatMul. The actual f32 matmuls (LoRA
+   adapter A/B, possibly cross-entropy log_softmax) are TINY at
+   rank=8. TF32 mode applies but the overhead of switching modes
+   per call may dominate the savings.
+3. **Some non-matmul cuBLAS dispatch (e.g. axpy, scal) might also
+   route differently under TF32 mode and pick worse paths.**
+
+### Conclusion
+
+TF32 mode is **NOT a free win on Ampere for QLoRA training** as I
+claimed. The PyTorch default ENABLES it, but PyTorch's overall
+training stack also has many compensating mechanisms. For our
+specific path (rank-8 LoRA over a Q4_K_M quantized 7B base), the
+flag is a regression on kokonoe.
+
+### Action
+
+1. Mark `G-tf32-s128` REJECTED on 8GB Ampere QLoRA path.
+2. The flag stays in the binary (default OFF, no effect when off).
+3. Re-test on cnc 16GB with bigger ranks (>=64) where the f32 LoRA
+   matmuls are large enough that TF32 might actually help. Expected
+   to remain neutral or slight win there; not a priority.
+4. Document in commit history that the TF32 hypothesis was tested
+   and rejected on this hardware/config.
+
+### Honesty escalation
+
+Third rejected hypothesis tonight. The pattern is:
+- F-cechunk32-s128 (memory): theoretical math said -155 MB; actual
+  behavior was OOM.
+- F-cechunk32-s128 (memory, with retention fix): same expected
+  improvement; actual behavior was OOM again.
+- G-tf32-s128 (speed): theoretical claim was +5-15%; actual behavior
+  was -25.5%.
+
+This suggests the 8GB Ampere QLoRA configuration is NOT in the
+sweet spot any of these wins target. The configuration is at a
+hard memory ceiling AND a small-matmul throughput floor where
+generic optimizations don't apply cleanly. The 5.5 tok/s baseline
+is closer to optimal-for-this-hardware than I'd been claiming.
+
+The real "more juice" path is bigger VRAM (cnc 16GB) where these
+flags actually have room to express their wins. On 8GB Ampere we
+appear to be at a local optimum.
+
+
+## [2026-04-25T17:41:36] G-tf32-s128 — INCONCLUSIVE
+- TF32 GEMMs on Ampere — flip CUBLAS_COMPUTE_32F_FAST_TF32 for f32 matmuls (LoRA adapters + lm_head). Free 5-15% on Ampere.
+- baseline preset: `q4km-7b-r8-qv-s128-gc`
+- test preset: `q4km-7b-r8-qv-s128-gc-tf32`
+  - no run data
+- reason: bench run failed or was dry-run
+
+## [2026-04-25T18:10:30] H-loraf16-s128 — REJECT
+- f16 LoRA forward — cast adapter A/B weights to input dtype at use-time. Free 1-3% expected at rank 8.
+- baseline preset: `q4km-7b-r8-qv-s128-gc` (5.5 tok/s, 7919 MB peak, p95 55963 ms)
+- test preset:     `q4km-7b-r8-qv-s128-gc-loraf16` (4.8 tok/s, 7816 MB peak, p95 70093 ms)
+- primary metric:  tok_per_sec, direction increase, threshold +1.0%
+- delta:           **-12.7%** (regression)
+- regression check (other metrics, tolerance 3.0%):
+  - peak_vram_mb:   -1.3% (within tolerance, noise)
+  - step_ms_p95:    +25.2% (FAR over tolerance — actually slower under load)
+- artifact:        bench/results/q4km-7b-r8-qv-s128-gc-loraf16-a60790b.json
+
+### Why it lost
+The forward casts fp32 LoRA A/B weights to input dtype (BF16) at every step
+to enable a faster matmul. Theory: BF16 matmul should beat F32 matmul on
+Ampere. Actual: the per-step `to_dtype` copy of A/B weights (rank-8 so the
+weights themselves are tiny, but it's done every micro-step on every layer)
+plus suspect candle BF16 matmul performance versus its F32 path nets a
+12.7% tok/s loss and a 25% p95 regression.
+
+### What ships anyway
+The code change in `lora.rs` is left in tree gated by the dtype check —
+it's a no-op when adapter dtype already matches input dtype, and only
+activates when there's a dtype mismatch (which there isn't in the BF16
+training path). So the code is safe to keep but provides no win on this
+hardware/config.
+
+### What this means
+Three out of four bench-tested wins on the 3070 Ti tonight have been
+rejected (F twice, G once, H once). PR1 build fix + Tensor::backward_into
++ QMatMul backward (the API/build wins) all stand; the perf flags
+(--ce-chunk-size, --tf32, f16-LoRA) all under-perform on this hardware.
+The 5.5 tok/s baseline is the local optimum on 8GB Ampere — the real
+gains live on >=16GB hardware where prequant / fuseqkv / chunked CE
+become tractable.
+

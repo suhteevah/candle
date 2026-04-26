@@ -44,6 +44,12 @@ $presets = @{
     'q4km-7b-r8-qv-s128-gc-cechunk32'    = @{ extra = @('--ce-chunk-size', '32') }
     'q4km-7b-r8-qv-s128-gc-prequant'     = @{ extra = @('--prequantize-base') }
     'q4km-7b-r8-qv-s128-gc-prequant-fq'  = @{ extra = @('--prequantize-base', '--fuse-qkv') }
+    'q4km-7b-r8-qv-s128-gc-tf32'         = @{ extra = @('--tf32') }
+    # Win H is a code-level change inside lora.rs (cast adapter weights
+    # to input dtype before matmul). It applies to ALL configs without
+    # a CLI flag — bench it via a re-run of the no-flag preset against
+    # the locked baseline.
+    'q4km-7b-r8-qv-s128-gc-loraf16'      = @{ extra = @() }
     'q4km-7b-r8-qv-s128-gc-all-on'       = @{
         extra = @('--prequantize-base', '--fuse-qkv', '--ce-chunk-size', '32')
     }

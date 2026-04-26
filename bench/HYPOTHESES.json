@@ -18,6 +18,26 @@
   ],
   "hypotheses": [
     {
+      "id": "H-loraf16-s128",
+      "title": "f16 LoRA forward — cast adapter A/B weights to input dtype at use-time. Free 1-3% expected at rank 8.",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "q4km-7b-r8-qv-s128-gc-loraf16",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 1.0,
+      "regression_tolerance_pct": 3.0
+    },
+    {
+      "id": "G-tf32-s128",
+      "title": "TF32 GEMMs on Ampere — flip CUBLAS_COMPUTE_32F_FAST_TF32 for f32 matmuls (LoRA adapters + lm_head). Free 5-15% on Ampere.",
+      "baseline_preset": "q4km-7b-r8-qv-s128-gc",
+      "test_preset": "q4km-7b-r8-qv-s128-gc-tf32",
+      "primary_metric": "tok_per_sec",
+      "direction": "increase",
+      "threshold_pct": 2.0,
+      "regression_tolerance_pct": 5.0
+    },
+    {
       "id": "F-cechunk32-s128",
       "title": "Chunked CE chunk=32 at seq=128 — REJECTED 2x on 8GB (autograd retention + per-chunk-bwd both OOM). Defer to >=16GB.",
       "_status": "REJECTED 2026-04-25 (OOM) and 2026-04-25 (OOM with retention fix)",

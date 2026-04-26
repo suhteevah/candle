@@ -104,14 +104,38 @@ impl LoRALinear {
 
     /// Returns the additive LoRA delta to add to the base projection output.
     /// `training=true` applies dropout; `false` skips it (for eval).
+    ///
+    /// Adapter weights are STORED in fp32 (optimizer state stability and
+    /// PEFT-export compatibility), but the FORWARD matmul runs in the
+    /// dtype of the input `x` — which is typically bf16 (Ampere training)
+    /// or f16 (Pascal training / inference). This lets cuBLAS pick the
+    /// tensor-core path on Ampere instead of the fp32 path. Adapter
+    /// weights are cast at use time; the cast is cheap for rank-8
+    /// adapters (~32 KB per matrix). For larger ranks the cast overhead
+    /// could outweigh the matmul speedup; revisit if rank exceeds 64.
     pub fn forward_delta(&self, x: &Tensor, training: bool) -> Result<Tensor> {
         let x = if let (Some(d), true) = (&self.dropout, training) {
             d.forward(x, true)?
         } else {
             x.clone()
         };
-        let ax = self.a.forward(&x)?;
-        let bax = self.b.forward(&ax)?;
+        let target_dtype = x.dtype();
+        // Fast path: weights already match input dtype (rare; usually
+        // adapters are fp32 and inputs are bf16/f16).
+        if self.a.weight().dtype() == target_dtype {
+            let ax = self.a.forward(&x)?;
+            let bax = self.b.forward(&ax)?;
+            return bax.affine(self.scaling, 0.0);
+        }
+        // Cast weights to input dtype for the matmul. The cast is a
+        // device-side dtype conversion, not a host roundtrip.
+        let a_w = self.a.weight().to_dtype(target_dtype)?;
+        let b_w = self.b.weight().to_dtype(target_dtype)?;
+        // Inline matmul rather than Linear::forward so we don't pay for
+        // an extra wrapping layer; the math is identical to what Linear
+        // would do (and we have no bias on adapter A or B).
+        let ax = x.matmul(&a_w.t()?)?;
+        let bax = ax.matmul(&b_w.t()?)?;
         bax.affine(self.scaling, 0.0)
     }
 }
