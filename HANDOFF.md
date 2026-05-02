@@ -1,124 +1,83 @@
 # Candle Fork Handoff
 
 ## Last Updated
-2026-04-24
+2026-05-01
 
 ## Project Status
-🟢 **7B QLoRA training on 8GB working end-to-end with real loss decline on matt-voice corpus.**
+🟢 **7B QLoRA on 8GB Ampere remains rock-solid; TDPI loop has now stress-tested four perf hypotheses and rejected three of them. 5.5 tok/s baseline is the local optimum on this hardware.**
 
 ## What Was Done This Session
 
-Single multi-hour push from "candle scaffold + plan" to "verified 7B fine-tuning of matt-voice on 8GB consumer GPU."
+TDPI (Test-Driven Performance Iteration) loop built and run end-to-end against the locked baseline. Four perf hypotheses tested with measured A/B; honesty discipline restored to the wardoc and commit messages.
 
-### candle-core changes
-- `Tensor::backward_into(&mut GradStore, Option<Tensor>)` — composable backward primitive (commit `5eba650`)
-- `GradStore::remove_by_id(TensorId)` for the gradient checkpointing flow
-- **`QMatMul` backward** via `QMatmulBwdOp` wrapper + analytical `QTensor::bwd` (commit `73b6c78`) — **the QLoRA unlock**. Reshape-safe for 3D grad_res via 2D fold/unfold.
+### Perf hypotheses tested
 
-### qwen-lora-train (the example)
-| Module | Purpose |
-|---|---|
-| `main.rs` | CLI + TrainModel enum dispatch on `--gguf` / `--base-dir` |
-| `qwen2_lora.rs` | fp16 safetensors path with LoRA + checkpointing |
-| `qwen2_lora_quantized.rs` | **NEW**: GGUF path with QMatMul+LoRA, lm_head pre-dequant to f16 |
-| `checkpoint.rs` | Last-layer-not-detached gradient checkpointing |
-| `fused_ops.rs` | **NEW**: fused softmax + fused RMSNorm with analytical bwd, detached y cache |
-| `lora.rs` | Reusable LoRA adapter module |
-| `bench.rs` | `--benchmark` mode: 3 warmup + 20 measured steps, single-line BENCH json output |
-| `dataset.rs` | matt-voice JSONL loader |
-| `adapter.rs` | PEFT-compatible safetensors exporter |
-| `xentropy.rs` / `prefetch.rs` | scaffolded but DISABLED (caused stalls; see Notes) |
+Baseline locked at `q4km-7b-r8-qv-s128-gc`: **5.5 tok/s, 7919 MB peak, p95 55963 ms** (commit `d4d24c7`, kokonoe RTX 3070 Ti).
 
-### Verified results
-
-**Benchmark progression on Qwen2.5-7B Q4_K_M, rank 8 q/v, GC, 3070 Ti 8GB:**
-
-| Config | tok/s | step ms | peak MB |
+| ID | Win | Verdict | Delta |
 |---|---|---|---|
-| seq=64 (initial 7B fit) | 5.2 | 47141 | 7947 |
-| + fused softmax | 5.3 | 46859 | 7914 |
-| + fused RMSNorm (detached) | 5.4 | 46171 | 7913 |
-| **seq=128** | 5.5 | 53933 | 7919 |
-| **seq=256** | 5.7 | 53111 | 7918 |
-| **seq=512** | 5.8 | 52180 | 7918 |
+| F-cechunk32-s128 | `--ce-chunk-size 32` (chunked CE w/ retention fix) | ❌ REJECT | OOM ×2 |
+| G-tf32-s128 | `--tf32` (CUBLAS_COMPUTE_32F_FAST_TF32) | ❌ REJECT | -25.5% tok/s, +108% p95 |
+| H-loraf16-s128 | f16 LoRA forward (cast adapter A/B at use-time) | ❌ REJECT | -12.7% tok/s, +25% p95 |
+| (no test) A-prequant-s128 | `--prequantize-base` | ⏸ defer | Adds ~10GB; won't fit on 8GB |
 
-Memory is essentially constant across seq lengths — QMatMul dequant transients dominate.
+All three rejected hypotheses had the same shape: **theoretical claim from optimization literature, never actually measured against hardware**. The TDPI loop caught them before they shipped to a real training run.
 
-**Real training run** (q/k/v/o, seq=128, 10 steps): loss **9.23 → 3.21 in 7 steps**, all 112 B matrices populated, PEFT-compatible adapter saved (19.25 MB).
+### Code changes (commit `279c210` on `matt-voice-lora`)
+
+- `bench/HONESTY.md` — **new**, canonical claim status table (✅ verified, ❌ rejected, ⏸ untested)
+- `bench/PERF_LOG.md` — append G + H REJECT verdicts with full evidence + analysis
+- `bench/HYPOTHESES.json` — add G + H, mark F `skip_on_kokonoe: true`
+- `bench/run-bench.ps1` — add `q4km-7b-r8-qv-s128-gc-tf32` and `q4km-7b-r8-qv-s128-gc-loraf16` presets
+- `qwen-lora-train/lora.rs` — Win H code: dtype-gated adapter cast in `forward_delta` (no-op on default BF16 path; only activates on dtype mismatch)
+- `qwen-lora-train/main.rs` — `--tf32` and `--reduced-precision-f16` CLI flags + `set_gemm_reduced_precision_f32(true)` wiring
+
+### Wardoc discipline
+
+`J:/claudeai/scratch/candle-killshot-wardoc.md` got a "Calibration on speed claims" disclaimer at the top. Most "+X% speedup" lines in that doc are NOT verified — anything not paired with a `PERF_LOG.md` entry is now treated as marketing prose until measured.
 
 ## Current State
 
-### Working
-- fp16 (safetensors) training path: validated on Qwen2.5-1.5B
-- **QLoRA (GGUF) training path: validated on Qwen2.5-3B and Qwen2.5-7B**
-- Gradient checkpointing
-- State checkpointing (`--save-every` / `--resume-from`)
-- `--benchmark` mode for reproducible measurement
-- TrainModel enum dispatch on `--gguf`
-- Fused softmax + fused RMSNorm (with analytical backward)
-- Single-binary deployment for inference (`Model::forward()` already supports kv-cached generation)
+### Working (verified)
+- 7B QLoRA training on 8GB at 5.5 tok/s — no changes needed, do not touch
+- `Tensor::backward_into` API — used by matt-voice training
+- `QMatMul` backward — used by 7B QLoRA path
+- TDPI loop infrastructure — `bench/run-bench.ps1`, `bench/tdpi-loop.py`, baseline locked
 
-### Stubbed / Disabled
-- `--prefetch-queue > 0` — causes ~8% GPU util stall (disabled by default, defaults to 0)
-- `--ce-chunk-size > 0` — same stall (disabled, defaults to 0)
-- Multi-shard GGUF — candle's `gguf_file::Content::read` is single-file only; download single-file from bartowski
+### Working but DON'T enable
+- `--ce-chunk-size N` flag — present, OOMs at any chunk size on 8GB
+- `--tf32` flag — present, regresses 25%
+- f16 LoRA cast path in `lora.rs` — present, gated to no-op on default BF16; do not force-enable
+
+### Stubbed / scaffolded
+- `xentropy.rs::tiled_cross_entropy_with_backward` — wired but OOMs; needs ≥16GB to test
+- `prefetch.rs` — caused stalls, disabled
 
 ## Blocking Issues
-None for matt-voice training. We can run a real fine-tune NOW.
+
+- **kokonoe 8GB ceiling** — 99.4% of card on baseline; no headroom for prequant / fuseqkv / chunked CE. Real perf wins blocked on >=16GB hardware.
+- **cnc P100s blocked on power cables + airflow** — proper EPS 8-pin + directed blower fan still pending. Pulled cards from tower 2026-04-24 after thermal failure.
+- **`origin` remote (`suhteevah/candle-src.git`) is broken** — push fails with "did not receive expected object". Use `matt` remote (`suhteevah/candle.git`) for the real fork. Branches live there.
+- **Local branch `matt-voice-lora` is buried under github-uploader-buildout commits** — `git log` shows 6× "Initial commit" piled on top of `279c210`. The real work is preserved in those commits and pushed to `matt/matt-voice-lora`, but local HEAD does not match remote. Fix: `git reset --hard matt/matt-voice-lora` next session if working locally.
 
 ## What's Next
 
-Prioritized for next session:
+In priority order:
 
-1. **Stage 3: Fused RoPE** — same pattern as fused_softmax / fused_rms_norm. RoPE is orthogonal so backward is the same op with negated sin. Expected: small further speedup at this seq length (RoPE is not the bottleneck), but useful for upstream PR completeness.
-2. **Flash Attention v2 wiring** — 3070 Ti is Ampere CC 8.6, supported. May be marginal at seq 64-128 but big win at 512+.
-3. **Real matt-voice fine-tune** — kick off a 1000+ step run with `--save-every 200` so we get intermediate adapters. Estimate: ~15-20 hours wall-clock for a meaningful pass over 46k pairs.
-4. **Inference server** — single-binary candle inference for serving the trained adapter. `Model::forward()` already does the heavy lifting; wrap with axum.
-5. **Upstream PR prep** — split commits into clean upstream-able units: (a) `Tensor::backward_into`, (b) `QMatMul` backward, (c) the qwen-lora-train example as a whole.
-6. **P100 cnc deployment** — when cables land. 16GB VRAM unlocks bigger configs (q/k/v/o/gate/up/down at seq 256+).
+1. **Resume on cnc P100 once blowers land** — that unblocks A-prequant, H-fuseqkv, F-cechunk32 verification (all three were the "wins" tonight rejected for being VRAM-bound on 8GB).
+2. **Open the 3 upstream PRs** (already pushed, need URLs hit):
+   - `pascal-sm60-compat`
+   - `backward-into`
+   - `qmatmul-backward`
+3. **matt-voice 7B QLoRA overnight on kokonoe** — script ready, Matt launches when ready. Do NOT add `--ce-chunk-size`, `--tf32`, or `--prequantize-base`. Default BF16 path with `--gradient-checkpoint` only.
+4. **Win R: tiled QMatMul backward dequant** — would lift seq=512 ceiling on 8GB. Code change required, defer until P100 path validates the value.
+5. **Reset local `matt-voice-lora` to match remote** — `git reset --hard matt/matt-voice-lora` to bury the github-uploader noise.
 
 ## Notes for Next Session
 
-### Gotchas already documented in memory
-- `reference_candle_nobwd_ops.md` — rope/softmax/rms_norm fast paths are no_bwd; use *_slow or fused variants for training
-- `reference_candle_gradient_checkpointing.md` — last layer must NOT be detached
-- `reference_candle_qmatmul_no_backward.md` — superseded by our 73b6c78
-- `reference_candle_7b_qlora_working.md` — first 7B fit
-- `reference_candle_7b_matt_voice_training.md` — verified loss decline on matt-voice
-
-### Methodology that's been working
-- One feature per commit, bench before + after via `--benchmark`
-- Cold-start protocol: kill all qwen-lora-train procs, wait 30s, verify VRAM >7GB free
-- If a change doesn't improve tok/s OR peak_vram, revert and diagnose
-
-### Known patterns NOT to repeat
-- Don't try to land multiple optimizations simultaneously (the early "hit all of it" pass burned hours)
-- Don't try device-side loss accumulation across micro-batches (`accum_loss_tensor = Some(a + &loss)`) — even with detach it pessimizes the allocator catastrophically
-- Don't trust "fp16 is fine" — Qwen weights are bf16, casting to fp16 OOMs from outlier overflow
-
-### Reproducible 7B training command
-
-```
-GGUF='J:\matt-voice\models\qwen2.5-7b-q4km.gguf'
-TOKENIZER='C:\Users\Matt\.cache\huggingface\hub\models--Qwen--Qwen2.5-1.5B-Instruct\snapshots\989aa7980e4cf806f80c7fef2b1adb7bc71aa306\tokenizer.json'
-
-J:/candle-src/target/release/examples/qwen-lora-train.exe \
-  --gguf "$GGUF" --tokenizer "$TOKENIZER" \
-  --dataset 'J:\matt-voice\training-data\matt-voice.jsonl' \
-  --output-dir 'J:\matt-voice\adapters\matt-voice-7b-qlora' \
-  --rank 8 --alpha 16 --target-modules q_proj,k_proj,v_proj,o_proj \
-  --batch-size 1 --grad-accum-steps 4 \
-  --learning-rate 2e-4 --max-steps 1000 --max-seq-len 128 \
-  --log-every 10 --save-every 200 --gradient-checkpoint
-```
-
-### Build prerequisites (kokonoe)
-- Rust toolchain MSVC: `cd J:\candle-src && rustup override set stable-x86_64-pc-windows-msvc`
-- VS BuildTools 2022 vcvars64 sourced via `J:\candle-src\build-cuda.bat` wrapper
-- `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=link.exe` (override global lld-link)
-- `CUDA_COMPUTE_CAP=86` for Ampere
-
-### Repo state
-- Branch: `matt-voice-lora` on github.com/suhteevah/candle (HEAD: latest commit, see `git log --oneline -5`)
-- ~25 commits this session, all pushed
-- cnc lockstep with kokonoe via `git pull origin matt-voice-lora` (cnc has the fork as origin)
+- **Trust the HONESTY.md table.** If a row says ❌ on this hardware, do not retry it without new evidence. Three perf claims tonight were rejected by measurement — every one of them sounded plausible on paper.
+- **No perf claim ships in a commit message without a PERF_LOG.md entry.** Established this session after the F/G/H trifecta. Don't break it.
+- **`run-bench.ps1` quirks** — PowerShell parser hates `${var}` and `{0} MB` patterns inside double-quoted strings. Use single quotes + `+` concatenation. Wrap native exe calls in `cmd /c` to avoid `$ErrorActionPreference='Stop'` treating stderr as fatal.
+- **Local optimum hypothesis** — 8GB Ampere QLoRA at this config (rank-8, q/v, seq=128, GC) is at hard memory ceiling AND small-matmul throughput floor. Generic optimizations don't apply. Real headroom is dtype/precision changes on the base path, which means a candle-core PR, not a CLI flag.
+- **`origin` remote broken** — always `git push matt matt-voice-lora`, never `origin`.
+- **Ridge Cell Repair / Mauker rack** — handoff zip ready at `J:/claudeai/scratch/fcp-rack-handoff.zip` for FCP. Blocking question: Snapmaker U1 (270mm bed, 15U) vs Centauri Carbon only (260mm bed, 16U).
